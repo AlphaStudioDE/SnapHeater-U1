@@ -149,6 +149,14 @@ The firmware skeleton includes a staged safety model:
 
 > Physical heater output should remain locked until the PCB pin mapping, output polarity, fan behavior and sensor readings are confirmed on real hardware.
 
+## Hardware responsibility and liability
+
+SnapHeater U1 is custom firmware for heater-related hardware. Flashing, wiring, modifying or operating Panda Breath-style hardware or DIY heater hardware can be dangerous if the device is connected, protected, configured or tested incorrectly.
+
+By using this project, the user accepts full responsibility for their own hardware, wiring, component choices, safety protections, validation and operation. The project authors and contributors cannot verify individual devices, DIY builds, installation quality, user actions or local safety conditions, and disclaim liability for damage, malfunction, unsafe operation, incorrect wiring, missing protections, user error, component failure, fire, injury, data loss or other outcomes arising from use of this project.
+
+See [docs/HARDWARE_LIABILITY_DISCLAIMER.md](docs/HARDWARE_LIABILITY_DISCLAIMER.md).
+
 ---
 
 ## DIY Reference Hardware
@@ -300,3 +308,5 @@ SnapHeater U1 now uses a Panda Breath-compatible 4 MB flash layout with two larg
 ## Development safety and original flash notes
 
 Before flashing hardware, make a full backup of the original device flash. See [`docs/FLASH_BACKUP_RESTORE.md`](docs/FLASH_BACKUP_RESTORE.md). Clean-room binary findings are summarized in [`docs/BINARY_FINDINGS_NOTES.md`](docs/BINARY_FINDINGS_NOTES.md).
+
+A generic 4 MB original-firmware restoration image is available at [`firmware/original/generic.bin`](firmware/original/generic.bin). Restore instructions are in [`docs/BACK_TO_ORIGINAL_FW.md`](docs/BACK_TO_ORIGINAL_FW.md).

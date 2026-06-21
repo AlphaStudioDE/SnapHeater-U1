@@ -30,3 +30,4 @@ reports/
 *.bin
 *.elf
 *.map
+!firmware/original/generic.bin
