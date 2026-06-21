@@ -5,6 +5,13 @@ sdkconfig.old
 managed_components/
 dependencies.lock
 
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+
 # Editor / OS
 .vscode/
 .idea/

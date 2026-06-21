@@ -2,6 +2,7 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Added an Android companion app Compose UI prototype under `apps/android/SnapHeaterU1`.
 - Added DIY reference hardware documentation with BOM, wiring diagram and validation checklist.
 - Added DIY sourcing examples with budget-oriented part families and AliExpress search links.
 - Added an example 24 V / 300 W DIY shopping cart with expected budget prices.
