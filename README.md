@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Target: ESP32--C3](https://img.shields.io/badge/Target-ESP32--C3-blue.svg)](#build-target)
 [![Status: Development Skeleton](https://img.shields.io/badge/Status-Development%20Skeleton-orange.svg)](#current-stage)
+[![Support: Buy Me a Coffee](https://img.shields.io/badge/Support-Buy%20Me%20a%20Coffee-yellow.svg)](https://buymeacoffee.com/damianborkh)
 
 **Smart chamber-heater firmware skeleton for Panda Breath-style ESP32-C3 hardware, designed for Snapmaker U1.**
 
@@ -10,6 +11,17 @@ SnapHeater U1 is a from-scratch firmware architecture for turning a chamber-heat
 
 > Current status: **advanced firmware skeleton / architecture base**.
 > The project builds for ESP32-C3 with ESP-IDF v5.3.5 and is prepared for later bring-up, GPIO validation and Android application development.
+
+---
+
+## Support
+
+SnapHeater U1 is released under the MIT License and is developed as an open project.
+If this work helps you or you want to support continued firmware, documentation and hardware-validation work, you can support the project here:
+
+[Buy Me a Coffee](https://buymeacoffee.com/damianborkh)
+
+<img src="docs/assets/buymeacoffee_qr.png" alt="Buy Me a Coffee QR code" width="180">
 
 ---
 
