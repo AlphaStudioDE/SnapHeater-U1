@@ -10,7 +10,7 @@
 SnapHeater U1 is a from-scratch firmware architecture for turning a chamber-heater accessory into a printer-aware chamber climate companion for **Snapmaker U1**. It combines Moonraker-based printer awareness, BLE control, physical buttons, safety layers, thermal intelligence, post-print conditioning and presentation-ready documentation.
 
 > Current status: **advanced firmware skeleton / architecture base**.
-> The project builds for ESP32-C3 with ESP-IDF v5.3.5 and is prepared for later bring-up, GPIO validation and Android application development.
+> The project builds for ESP32-C3 with ESP-IDF v5.3.5 and is prepared for later bring-up, GPIO validation and mobile application development.
 > DIY reference hardware notes are available for builders who want to assemble a compatible low-voltage DC controller instead of using Panda Breath-style hardware.
 
 ---
@@ -226,7 +226,7 @@ The first hardware flash should be performed with physical heater output disable
 
 ---
 
-## Android app
+## Mobile apps
 
 The Android companion app prototype lives in [apps/android/SnapHeaterU1](apps/android/SnapHeaterU1).
 
@@ -234,10 +234,14 @@ Current status:
 
 - Jetpack Compose UI shell
 - mock firmware state
+- SnapScreen-like status-first layout
 - dashboard, modes, safety setup, diagnostics and settings views
+- EN primary UI direction with PL and DE resources started
 - prepared for later BLE integration
 
 The current app UI does not control real hardware yet.
+
+iOS is a planned target. The current iOS placeholder is documented in [apps/ios/SnapHeaterU1](apps/ios/SnapHeaterU1).
 
 ---
 

@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">SnapHeater U1</string>
+    <string name="language_primary">Deutsch</string>
+    <string name="snapheater_status">Status</string>
+    <string name="snapheater_modes">Modi</string>
+    <string name="snapheater_safety">Sicherheit</string>
+    <string name="snapheater_diagnostics">Diagnose</string>
+    <string name="snapheater_settings">Einstellungen</string>
+</resources>

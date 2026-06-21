@@ -2,6 +2,9 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Split the Android app prototype into model, data, BLE, theme, component and screen layers.
+- Added a SnapScreen-like mobile UI flow document and EN/PL/DE localization resource start.
+- Added an iOS target placeholder so mobile work can remain organized under `apps/`.
 - Added an Android companion app Compose UI prototype under `apps/android/SnapHeaterU1`.
 - Added DIY reference hardware documentation with BOM, wiring diagram and validation checklist.
 - Added DIY sourcing examples with budget-oriented part families and AliExpress search links.

@@ -2,7 +2,7 @@
 
 This matrix tracks the project skeleton status.  It is intentionally honest: a
 feature can already exist in the firmware architecture/API while still needing
-build fixes, PCB verification, Android implementation or real printer testing.
+build fixes, PCB verification, mobile implementation or real printer testing.
 
 Current baseline: the project builds for ESP32-C3 with ESP-IDF v5.3.5. The
 remaining "Needs hardware" and "Needs U1 test" entries still require physical
@@ -31,7 +31,8 @@ Legend:
 | Wi-Fi STA | Yes | Config | Yes | No | No | Optional | Credentials can be provisioned later. |
 | Local REST API | Yes | REST | Yes | No | No | No | Status/settings/events/probe foundation. |
 | BLE GATT control | Yes | BLE | Yes | No | No | Yes | Android app not yet implemented. |
-| Android companion app UI | Skeleton | Mock data | No | No | No | Yes | Compose UI shell added; BLE integration pending. |
+| Android companion app UI | Skeleton | Mock data | Not locally verified | No | No | In progress | Compose UI shell split into screens/components/theme; BLE integration pending. |
+| iOS companion app UI | Planned | N/A | No | No | No | Yes | Target documented; no Xcode project yet. |
 | BLE PIN unlock | Yes | BLE | Yes | No | No | Yes | App-level lock; not final production pairing. |
 | Snapmaker U1 Moonraker read integration | Yes | Status | Yes | No | Yes | Optional | Uses U1-specific fields from coroNET reference. |
 | U1 Symbiont Mode | Yes | Settings | Yes | Depends | Yes | Yes | Cooperative mode; optional safe climate/ventilation writes later. |
@@ -82,8 +83,8 @@ Legend:
 
 ## Current project boundary
 
-The Android app is intentionally out of scope for the next firmware-only step.
-The firmware already exposes the data and commands that the app will later use.
+The mobile apps are UI/integration prototypes until hardware validation confirms
+the final BLE status and control payloads.
 
 ## Next engineering phase
 
