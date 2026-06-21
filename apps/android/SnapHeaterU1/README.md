@@ -31,6 +31,8 @@ apps/android/SnapHeaterU1
 
 Then let Android Studio sync Gradle.
 
+Build setup notes are in [docs/BUILD_SETUP.md](docs/BUILD_SETUP.md).
+
 ## Safety Boundary
 
 The UI currently uses mock data. It must not be treated as proof that heater, fan, BLE or Moonraker control is safe on real hardware.

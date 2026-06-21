@@ -251,6 +251,8 @@ The current app UI does not control real hardware yet.
 
 iOS is a planned target. The current iOS placeholder is documented in [apps/ios/SnapHeaterU1](apps/ios/SnapHeaterU1).
 
+Android build setup notes are available in [apps/android/SnapHeaterU1/docs/BUILD_SETUP.md](apps/android/SnapHeaterU1/docs/BUILD_SETUP.md).
+
 ---
 
 

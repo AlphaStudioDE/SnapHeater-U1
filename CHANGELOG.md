@@ -2,6 +2,7 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Added Android app build setup notes for the first local Gradle sync/build.
 - Added project acknowledgements for community help and participation.
 - Added a hardware liability disclaimer for Panda Breath-style and DIY heater use.
 - Added a generic original-firmware restoration image and back-to-original flashing instructions.
