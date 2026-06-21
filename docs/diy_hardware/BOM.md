@@ -73,6 +73,49 @@ connector_rating > fuse_rating
 
 Avoid running high heater current through breadboards, jumper wires or small prototype contacts.
 
+## Example 24 V / 300 W Shopping Cart
+
+This is an example budget-oriented shopping cart for a DIY build roughly comparable to a 300 W Panda Breath-style chamber heater.
+
+Prices are rough marketplace expectations and do not include VAT, import fees or shipping. Use them for planning, not as guaranteed purchase prices.
+
+Electrical baseline:
+
+```text
+300 W / 24 V = 12.5 A
+```
+
+For a 300 W heater, a 24 V / 20 A supply is recommended over a 24 V / 15 A supply because it leaves useful margin.
+
+| Item | Example part family | Expected USD | Expected PLN |
+|---|---|---:|---:|
+| ESP32-C3 controller | ESP32-C3 SuperMini | 3-5 | 11-19 |
+| PTC heater | 24 V 300 W PTC air heater | 10-16 | 37-59 |
+| Power supply | 24 V 20 A / 480 W DC supply | 25-35 | 93-130 |
+| Heater MOSFET module | Larger logic-level MOSFET module, not tiny borderline board | 4-8 | 15-30 |
+| Fan MOSFET module | Small logic-level MOSFET module | 1-2 | 4-7 |
+| Buck converter | MP1584 / LM2596 24 V to 5 V module | 1-2 | 4-7 |
+| Fan or blower | 24 V blower / 5015 / radial fan | 4-8 | 15-30 |
+| Temperature sensors | 2x 100K B3950 NTC probes | 2-4 | 7-15 |
+| Fuse holder and fuse | Inline automotive blade fuse holder | 1.5-3 | 6-11 |
+| Thermal cutoff | KSD9700 / KSD301 / thermal fuse | 1-3 | 4-11 |
+| Power wiring | Silicone wire sized for current | 3-6 | 11-22 |
+| Power connectors | XT30 / XT60 / rated terminal blocks | 2-4 | 7-15 |
+| Buttons and indicators | OFF button, optional LEDs, resistors | 2-5 | 7-19 |
+| Enclosure and mounting | Basic enclosure, standoffs, insulation, strain relief | 5-12 | 19-45 |
+
+Expected total without VAT and shipping:
+
+```text
+low estimate:  about 64.5 USD / 239 PLN
+high estimate: about 113 USD / 419 PLN
+realistic budget cart: about 80-90 USD / 300-335 PLN
+```
+
+The realistic budget cart assumes you do not choose the cheapest possible power supply, MOSFET module, wiring or thermal protection.
+
+If you are not comfortable working with DC power wiring, 12.5 A heater current, fuses, MOSFET drivers and thermal cutoff placement, use a ready-made heater device or ask a qualified person to review the build before powering it.
+
 ## What Not To Use
 
 - ESP32 GPIO directly connected to heater or fan load.

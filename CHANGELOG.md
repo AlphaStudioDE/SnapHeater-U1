@@ -4,6 +4,7 @@
 
 - Added DIY reference hardware documentation with BOM, wiring diagram and validation checklist.
 - Added DIY sourcing examples with budget-oriented part families and AliExpress search links.
+- Added an example 24 V / 300 W DIY shopping cart with expected budget prices.
 - Added a staged safety unlock procedure for GPIO probe, heater probe and normal heater output.
 - Added a hardware bring-up checklist for the first physical Panda Breath-style board session.
 - Verified the firmware skeleton builds for ESP32-C3 with ESP-IDF v5.3.5.
