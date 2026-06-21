@@ -3,6 +3,9 @@
 This plan is the recommended order for moving from the current firmware skeleton
 to the first real Panda Breath / ESP32-C3 tests.
 
+For a bench checklist to use when hardware arrives, see
+[docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md).
+
 ## Safety principles
 
 1. Do not enable normal heater output during the first build.
@@ -179,7 +182,7 @@ CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y
 Start with conservative values:
 
 ```txt
-target chamber temp: 30-35°C
+target chamber temp: 30-35 C
 PTC cutoff: conservative
 manual session max: short
 fan post-run: enabled

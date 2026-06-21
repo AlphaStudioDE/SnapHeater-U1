@@ -174,6 +174,7 @@ Useful starting points:
 - [PROJECT_HIGHLIGHTS.md](PROJECT_HIGHLIGHTS.md) — public feature overview
 - [FEATURE_MATRIX.md](FEATURE_MATRIX.md) — feature readiness and test status
 - [BUILD_AND_TEST_PLAN.md](BUILD_AND_TEST_PLAN.md) — safe build and bring-up sequence
+- [docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md) — first physical hardware bring-up checklist
 - [docs/SYSTEM_DIAGRAMS.md](docs/SYSTEM_DIAGRAMS.md) — Mermaid diagrams
 - [main/board_panda_breath.h](main/board_panda_breath.h) — central board pin configuration
 
@@ -236,6 +237,8 @@ This repository currently contains a **feature-rich firmware skeleton**. It is i
 5. staged heater/fan bring-up.
 
 It is not yet a fully validated production firmware.
+
+For the first physical hardware session, follow [docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md).
 
 ---
 

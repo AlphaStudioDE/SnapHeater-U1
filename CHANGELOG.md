@@ -2,6 +2,7 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Added a hardware bring-up checklist for the first physical Panda Breath-style board session.
 - Verified the firmware skeleton builds for ESP32-C3 with ESP-IDF v5.3.5.
 - Set the default flash size to 4 MB to match the Panda Breath-style partition layout.
 - Fixed build issues around configuration defaults, temperature history sizing and compiler warnings.
