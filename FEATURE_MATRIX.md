@@ -20,6 +20,7 @@ Legend:
 |---|---:|---:|---:|---:|---:|---:|---|
 | ESP32-C3 / ESP-IDF project base | Yes | N/A | Yes | No | No | No | From-scratch project skeleton. |
 | Panda Breath board target | Yes | Status | Yes | Yes | No | No | Core pinout inferred; physical verification required. |
+| DIY reference hardware path | Docs | N/A | N/A | Yes | No | Optional | BOM, wiring diagram and validation checklist for low-voltage DC DIY builds. |
 | Heater output control | Yes | Yes | Yes | Yes | No | Optional | Locked by `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n` and Output Safety Latch. |
 | Fan / filter output control | Yes | Yes | Yes | Yes | No | Optional | Also used for cooldown/post-run. |
 | Chamber NTC reading | Yes | Status | Yes | Yes | No | No | ADC calibration still required. |

@@ -11,6 +11,7 @@ SnapHeater U1 is a from-scratch firmware architecture for turning a chamber-heat
 
 > Current status: **advanced firmware skeleton / architecture base**.
 > The project builds for ESP32-C3 with ESP-IDF v5.3.5 and is prepared for later bring-up, GPIO validation and Android application development.
+> DIY reference hardware notes are available for builders who want to assemble a compatible low-voltage DC controller instead of using Panda Breath-style hardware.
 
 ---
 
@@ -150,6 +151,20 @@ The firmware skeleton includes a staged safety model:
 
 ---
 
+## DIY Reference Hardware
+
+Builders who want to assemble compatible hardware instead of using Panda Breath-style hardware can start with [docs/diy_hardware/README.md](docs/diy_hardware/README.md).
+
+The DIY reference path includes:
+
+- [BOM](docs/diy_hardware/BOM.md)
+- [wiring diagram](docs/diy_hardware/WIRING_DIAGRAM.md)
+- [validation checklist](docs/diy_hardware/VALIDATION_CHECKLIST.md)
+
+The DIY reference is intended around low-voltage DC hardware and still requires the same staged safety unlock process as any other heater build.
+
+---
+
 ## Repository structure
 
 ```text
@@ -174,6 +189,7 @@ Useful starting points:
 - [PROJECT_HIGHLIGHTS.md](PROJECT_HIGHLIGHTS.md) — public feature overview
 - [FEATURE_MATRIX.md](FEATURE_MATRIX.md) — feature readiness and test status
 - [BUILD_AND_TEST_PLAN.md](BUILD_AND_TEST_PLAN.md) — safe build and bring-up sequence
+- [docs/diy_hardware/README.md](docs/diy_hardware/README.md) — DIY reference hardware BOM and wiring notes
 - [docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md) — first physical hardware bring-up checklist
 - [docs/SAFETY_UNLOCK_PROCEDURE.md](docs/SAFETY_UNLOCK_PROCEDURE.md) — staged criteria for unlocking probe and heater output features
 - [docs/SYSTEM_DIAGRAMS.md](docs/SYSTEM_DIAGRAMS.md) — Mermaid diagrams

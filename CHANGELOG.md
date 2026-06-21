@@ -2,6 +2,7 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Added DIY reference hardware documentation with BOM, wiring diagram and validation checklist.
 - Added a staged safety unlock procedure for GPIO probe, heater probe and normal heater output.
 - Added a hardware bring-up checklist for the first physical Panda Breath-style board session.
 - Verified the firmware skeleton builds for ESP32-C3 with ESP-IDF v5.3.5.
