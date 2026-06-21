@@ -2,6 +2,8 @@
 
 This bill of materials describes component roles and selection criteria. Exact parts depend on the target voltage, heater power, enclosure and local availability.
 
+For example part families and AliExpress search links, see [SOURCING_EXAMPLES.md](SOURCING_EXAMPLES.md).
+
 ## Core Electronics
 
 | Item | Quantity | Selection notes |

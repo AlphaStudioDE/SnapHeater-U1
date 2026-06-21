@@ -158,6 +158,7 @@ Builders who want to assemble compatible hardware instead of using Panda Breath-
 The DIY reference path includes:
 
 - [BOM](docs/diy_hardware/BOM.md)
+- [sourcing examples](docs/diy_hardware/SOURCING_EXAMPLES.md)
 - [wiring diagram](docs/diy_hardware/WIRING_DIAGRAM.md)
 - [validation checklist](docs/diy_hardware/VALIDATION_CHECKLIST.md)
 

@@ -19,9 +19,10 @@ The DIY hardware path is a reference architecture, not a certified product desig
 ## Recommended Reading Order
 
 1. [BOM.md](BOM.md)
-2. [WIRING_DIAGRAM.md](WIRING_DIAGRAM.md)
-3. [VALIDATION_CHECKLIST.md](VALIDATION_CHECKLIST.md)
-4. [../SAFETY_UNLOCK_PROCEDURE.md](../SAFETY_UNLOCK_PROCEDURE.md)
+2. [SOURCING_EXAMPLES.md](SOURCING_EXAMPLES.md)
+3. [WIRING_DIAGRAM.md](WIRING_DIAGRAM.md)
+4. [VALIDATION_CHECKLIST.md](VALIDATION_CHECKLIST.md)
+5. [../SAFETY_UNLOCK_PROCEDURE.md](../SAFETY_UNLOCK_PROCEDURE.md)
 
 ## Safety Boundary
 
