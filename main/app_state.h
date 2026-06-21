@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "app_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 

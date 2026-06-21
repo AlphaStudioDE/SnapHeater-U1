@@ -301,7 +301,7 @@ static void update_auto_context(shu1_settings_t *s, const shu1_printer_state_t *
         shu1_ble_notify_status_now();
     }
 
-    snprintf(g_last_auto_printer_state, sizeof(g_last_auto_printer_state), "%s", p->normalized_state && p->normalized_state[0] ? p->normalized_state : "idle");
+    snprintf(g_last_auto_printer_state, sizeof(g_last_auto_printer_state), "%s", p->normalized_state[0] ? p->normalized_state : "idle");
 }
 
 

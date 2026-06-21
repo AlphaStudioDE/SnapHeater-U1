@@ -14,14 +14,18 @@ to the first real Panda Breath / ESP32-C3 tests.
 
 ## Phase 1: Build only
 
+Current public baseline: the firmware skeleton has been verified to build for
+ESP32-C3 with ESP-IDF v5.3.5 using the Panda Breath-style 4 MB partition layout.
+Hardware bring-up is still pending.
+
 ```bash
 idf.py set-target esp32c3
 idf.py menuconfig
 idf.py build
 ```
 
-Expected first result: possibly compile errors.  Fix only build-related issues in
-this phase. Do not add new features until the project builds.
+If rebuilding from a clean checkout, fix only build-related issues in this
+phase. Do not add new features until the project builds.
 
 Recommended first configuration:
 
@@ -40,7 +44,8 @@ Unknown LEDs/buttons should remain `-1` until verified.
 
 ## Phase 2: Flash without heater output
 
-After a successful build:
+After a successful build and after making or verifying a full original flash
+backup:
 
 ```bash
 idf.py -p <PORT> flash monitor

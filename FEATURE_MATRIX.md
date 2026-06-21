@@ -4,15 +4,19 @@ This matrix tracks the project skeleton status.  It is intentionally honest: a
 feature can already exist in the firmware architecture/API while still needing
 build fixes, PCB verification, Android implementation or real printer testing.
 
+Current baseline: the project builds for ESP32-C3 with ESP-IDF v5.3.5. The
+remaining "Needs hardware" and "Needs U1 test" entries still require physical
+devices.
+
 Legend:
 
 - **Skeleton**: code/API/configuration exists as a development scaffold.
-- **Needs build**: must be compiled and fixed in ESP-IDF.
+- **Build verified**: compiled successfully in ESP-IDF.
 - **Needs hardware**: requires Panda Breath PCB / real heater tests.
 - **Needs U1 test**: requires a real Snapmaker U1 Moonraker session.
 - **Needs Android**: firmware/API exists but the phone app still has to be built.
 
-| Feature | Firmware skeleton | BLE/API | Needs build | Needs hardware | Needs U1 test | Needs Android | Notes |
+| Feature | Firmware skeleton | BLE/API | Build verified | Needs hardware | Needs U1 test | Needs Android | Notes |
 |---|---:|---:|---:|---:|---:|---:|---|
 | ESP32-C3 / ESP-IDF project base | Yes | N/A | Yes | No | No | No | From-scratch project skeleton. |
 | Panda Breath board target | Yes | Status | Yes | Yes | No | No | Core pinout inferred; physical verification required. |
@@ -81,10 +85,8 @@ The firmware already exposes the data and commands that the app will later use.
 
 ## Next engineering phase
 
-1. Compile `v17` with ESP-IDF for ESP32-C3.
-2. Fix compile errors without adding new features.
-3. Flash with heater output disabled.
-4. Validate Wi-Fi, REST, BLE status, event log and settings storage.
-5. Use GPIO Probe only after reviewing the board and power path.
-
-| Original Panda Breath flash layout | Added | No | No | No | Yes | Project now uses the confirmed 4 MB dual-OTA partition layout from a full flash dump. |
+1. Keep the public repository synchronized with the build-verified skeleton.
+2. Flash with heater output disabled only after hardware arrives and backup is verified.
+3. Validate Wi-Fi, REST, BLE status, event log and settings storage.
+4. Use GPIO Probe only after reviewing the board and power path.
+5. Enable normal heater output only after sensor, fan, polarity and safety-latch validation.

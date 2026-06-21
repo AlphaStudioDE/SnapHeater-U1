@@ -46,7 +46,7 @@ esp_err_t shu1_ntc_init(void) {
 
     adc_oneshot_chan_cfg_t config = {
         .bitwidth = ADC_BITWIDTH_DEFAULT,
-        .atten = ADC_ATTEN_DB_11,
+        .atten = ADC_ATTEN_DB_12,
     };
     ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(g_adc, (adc_channel_t)CONFIG_SHU1_CHAMBER_ADC_CH, &config), TAG, "chamber adc cfg failed");
     ESP_RETURN_ON_ERROR(adc_oneshot_config_channel(g_adc, (adc_channel_t)CONFIG_SHU1_PTC_ADC_CH, &config), TAG, "ptc adc cfg failed");

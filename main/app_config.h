@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "sdkconfig.h"
+
 #define SHU1_FW_NAME        "SnapHeater U1"
 #define SHU1_FW_VERSION     "1.7.0-dev"
 #define SHU1_DEFAULT_MATERIAL_MISMATCH_WARNING_ENABLED 1
@@ -297,4 +299,3 @@
 #define SHU1_PHYS_LED_MODE_SOLID     1
 #define SHU1_PHYS_LED_MODE_BLINK_SLOW 2
 #define SHU1_PHYS_LED_MODE_BLINK_FAST 3
-

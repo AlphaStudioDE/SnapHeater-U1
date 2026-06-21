@@ -1,20 +1,27 @@
-## v1.9.0-dev — BIN analysis and restore readiness
-
-- Added flash backup/restore documentation.
-- Added clean-room binary findings notes.
-- Added BIN analysis limits and hardware-verification checklist.
-
 # Changelog
 
-## v1.9.1-dev — Attribution and origin readiness
+## v1.9.2-dev - ESP-IDF build readiness
+
+- Verified the firmware skeleton builds for ESP32-C3 with ESP-IDF v5.3.5.
+- Set the default flash size to 4 MB to match the Panda Breath-style partition layout.
+- Fixed build issues around configuration defaults, temperature history sizing and compiler warnings.
+- Updated ADC attenuation naming for ESP-IDF v5.3 compatibility.
+- Kept normal heater output and GPIO probe disabled by default.
+
+## v1.9.1-dev - Attribution and origin readiness
 
 - Added AUTHORS.md, NOTICE.md, PROJECT_ORIGIN.md and BRANDING_AND_ATTRIBUTION.md.
 - Added MIT SPDX headers to source files.
 - Clarified project origin, upstream authorship and fork attribution guidance.
 - Kept the project under MIT while documenting attribution expectations and contest/community clarity.
 
+## v1.9.0-dev - BIN analysis and restore readiness
 
-## v1.8.0-dev — GitHub public package preparation
+- Added flash backup/restore documentation.
+- Added clean-room binary findings notes.
+- Added BIN analysis limits and hardware-verification checklist.
+
+## v1.8.0-dev - GitHub public package preparation
 
 - Added GitHub-oriented README.
 - Added Mermaid architecture diagrams.
@@ -23,7 +30,7 @@
 - Added repository hygiene files such as `.gitignore`.
 - Removed internal research notes from the public folder.
 
-## v1.7.0-dev — Test readiness
+## v1.7.0-dev - Test readiness
 
 - Added central board configuration header.
 - Added feature matrix.
