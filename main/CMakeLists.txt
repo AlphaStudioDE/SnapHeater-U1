@@ -1,0 +1,30 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "app_state.c"
+        "wifi_sta.c"
+        "ntc.c"
+        "heater.c"
+        "safety.c"
+        "api_server.c"
+        "moonraker_client.c"
+        "ble_control.c"
+        "profiles.c"
+        "event_log.c"
+        "settings_store.c"
+        "physical_controls.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_event
+        esp_netif
+        esp_http_server
+        esp_http_client
+        esp_adc
+        esp_timer
+        driver
+        json
+        esp_websocket_client
+        bt
+)

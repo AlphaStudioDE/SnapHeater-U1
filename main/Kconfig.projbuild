@@ -1,0 +1,315 @@
+menu "SnapHeater U1"
+
+config SHU1_WIFI_SSID
+    string "Wi-Fi SSID"
+    default "YOUR_WIFI"
+
+config SHU1_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default "YOUR_PASSWORD"
+
+config SHU1_MOONRAKER_HOST
+    string "Snapmaker U1 / Moonraker host or IP"
+    default "192.168.1.100"
+
+config SHU1_MOONRAKER_PORT
+    int "Moonraker port"
+    default 7125
+
+menu "BLE / Android control"
+
+config SHU1_ENABLE_BLE
+    bool "Enable BLE GATT control service"
+    default y
+    help
+        Enables local Android control through Bluetooth Low Energy.
+        BLE remains a local channel; Moonraker synchronization still uses Wi-Fi.
+
+config SHU1_BLE_DEVICE_NAME
+    string "BLE advertised device name"
+    default "SnapHeater U1"
+
+config SHU1_BLE_REQUIRE_PIN_FOR_CONTROL
+    bool "Require PIN unlock before accepting BLE control writes"
+    default y
+    help
+        When enabled, the Android app must first write {"unlock":"PIN"}.
+        Status/diagnostics reads are still allowed without unlock.
+
+config SHU1_BLE_CONTROL_PIN
+    string "BLE local control PIN"
+    default "123456"
+    help
+        Development PIN. Change before real use. This is an application-level lock,
+        not a replacement for BLE pairing/bonding in a production app.
+
+config SHU1_BLE_NOTIFY_PERIOD_MS
+    int "BLE status notification period in ms"
+    default 2000
+    range 500 10000
+
+config SHU1_BLE_MAX_WRITE_BYTES
+    int "Maximum BLE control write payload bytes"
+    default 512
+    range 64 1024
+
+config SHU1_BLE_MAX_READ_BYTES
+    int "Maximum BLE read payload bytes"
+    default 1024
+    range 256 2048
+
+endmenu
+
+menu "Smart heating / cooldown policy"
+
+config SHU1_DEFAULT_FAN_POSTRUN_MIN
+    int "Default fan post-run time after heater off, minutes"
+    default 5
+    range 0 60
+    help
+        Used as the factory default for the user setting fan_postrun_min.
+
+config SHU1_DEFAULT_TEMPERING_ENABLED
+    bool "Enable print-finish tempering by default (Android/user option)"
+    default n
+
+config SHU1_DEFAULT_TEMPERING_END_TEMP_C
+    int "Default tempering end temperature after print finish (0 = ramp to heater off)"
+    default 0
+    range 0 60
+    help
+        0 means ramp the virtual chamber target down to heater-off by the selected duration.
+        Higher values keep a low final target until the ramp completes, then switch heating off.
+
+config SHU1_DEFAULT_TEMPERING_DURATION_MIN
+    int "Default tempering ramp duration after print finish, minutes"
+    default 30
+    range 0 240
+
+endmenu
+
+menu "Inferred Panda Breath hardware pins - verify before live use"
+
+config SHU1_HEATER_GPIO
+    int "Heater/PTC output GPIO"
+    default 18
+    help
+        Inferred from multi-version static analysis. Must be verified on real PCB.
+
+config SHU1_FAN_GPIO
+    int "Fan/filter output GPIO"
+    default 3
+    help
+        Inferred from multi-version static analysis. Must be verified on real PCB.
+
+config SHU1_BUTTON_GPIO
+    int "Physical button GPIO (-1 disables)"
+    default 7
+    help
+        Inferred from static analysis. Verify on PCB.
+
+config SHU1_STATUS_LED_GPIO
+    int "Status LED GPIO (-1 disables)"
+    default -1
+
+config SHU1_CHAMBER_ADC_CH
+    int "ADC1 channel for chamber/warehouse NTC"
+    default 0
+    help
+        ADC1_CH0 is GPIO0 on ESP32-C3. Inferred from WAREHOUSE_ADC_CHAN.
+
+config SHU1_PTC_ADC_CH
+    int "ADC1 channel for PTC NTC"
+    default 1
+    help
+        ADC1_CH1 is GPIO1 on ESP32-C3. Inferred from PTC_ADC_CHAN.
+
+endmenu
+
+
+
+menu "Physical buttons and indicator LEDs"
+
+config SHU1_ENABLE_PHYSICAL_CONTROLS
+    bool "Enable Panda Breath-style physical controls"
+    default y
+    help
+        Adds a local physical control layer for buttons and indicator/backlight LEDs.
+        Unknown GPIOs default to -1 and therefore remain disabled until verified.
+
+config SHU1_BUTTON_ACTIVE_LOW
+    bool "Physical buttons are active low"
+    default y
+    help
+        Most small button inputs are pulled up and close to GND. Verify on PCB.
+
+config SHU1_LED_ACTIVE_HIGH
+    bool "Indicator LEDs are active high"
+    default y
+    help
+        Set to n if the LED/backlight drivers are active low after PCB verification.
+
+config SHU1_BUTTON_AUTO_GPIO
+    int "AUTO button GPIO (-1 disables)"
+    default -1
+
+config SHU1_BUTTON_ON_GPIO
+    int "ON / Manual button GPIO (-1 disables)"
+    default -1
+
+config SHU1_BUTTON_OFF_GPIO
+    int "OFF / Safe-stop button GPIO (-1 disables)"
+    default -1
+
+config SHU1_BUTTON_GENERIC_GPIO
+    int "Generic/acknowledge button GPIO (-1 disables)"
+    default -1
+    help
+        Optional fallback for boards with only one accessible button. Short press acknowledges
+        notifications; long press performs emergency safe-off.
+
+config SHU1_LED_AUTO_GPIO
+    int "AUTO button/backlight LED GPIO (-1 disables)"
+    default -1
+
+config SHU1_LED_ON_GPIO
+    int "ON/Manual button/backlight LED GPIO (-1 disables)"
+    default -1
+
+config SHU1_LED_OFF_GPIO
+    int "OFF/Safe-stop button/backlight LED GPIO (-1 disables)"
+    default -1
+
+config SHU1_LED_ERROR_GPIO
+    int "Error/status warning LED GPIO (-1 disables)"
+    default -1
+
+config SHU1_LED_WIFI_GPIO
+    int "Wi-Fi/Moonraker indicator LED GPIO (-1 disables)"
+    default -1
+
+config SHU1_LED_BLE_GPIO
+    int "BLE indicator LED GPIO (-1 disables)"
+    default -1
+
+config SHU1_PHYSICAL_DEBOUNCE_MS
+    int "Button debounce time in ms"
+    default 45
+    range 10 200
+
+config SHU1_PHYSICAL_LONG_PRESS_MS
+    int "Long press threshold in ms"
+    default 2000
+    range 500 8000
+
+config SHU1_PHYSICAL_TASK_PERIOD_MS
+    int "Physical controls polling period in ms"
+    default 50
+    range 20 500
+
+endmenu
+
+menu "Output safety locks"
+
+config SHU1_ENABLE_HEATER_OUTPUT
+    bool "Enable normal physical heater output"
+    default n
+    help
+        Keep disabled until PCB pins, active polarity, sensors and fuse path are verified.
+        With this off, normal temperature automation never energizes the heater GPIO.
+
+config SHU1_HEATER_ACTIVE_HIGH
+    bool "Heater output is active high"
+    default y
+    help
+        Static analysis suggests HIGH = ON, but verify with meter/logic analyzer.
+
+config SHU1_FAN_ACTIVE_HIGH
+    bool "Fan output is active high"
+    default y
+    help
+        Static analysis suggests HIGH = ON, but verify with meter/logic analyzer.
+
+config SHU1_ENABLE_GPIO_PROBE
+    bool "Enable diagnostic GPIO pulse API"
+    default n
+    help
+        Enables short manual pulse commands on /api/probe. This can energize outputs.
+        Use only on open bench, with current limiting and external supervision.
+
+config SHU1_MAX_HEATER_PROBE_MS
+    int "Maximum heater probe pulse length in ms"
+    default 300
+    range 50 1000
+
+config SHU1_MAX_FAN_PROBE_MS
+    int "Maximum fan probe pulse length in ms"
+    default 3000
+    range 100 10000
+
+endmenu
+
+menu "NTC / ADC"
+
+config SHU1_NTC_BETA
+    int "NTC beta value"
+    default 3950
+
+config SHU1_NTC_R0_OHM
+    int "NTC nominal resistance at 25C"
+    default 100000
+
+config SHU1_NTC_SERIES_OHM
+    int "NTC series resistor"
+    default 100000
+
+config SHU1_ADC_OPEN_RAW_MIN
+    int "ADC raw value below this is treated as sensor open/invalid"
+    default 50
+
+config SHU1_ADC_SHORT_RAW_MAX
+    int "ADC raw value above this is treated as sensor short/invalid"
+    default 4050
+
+endmenu
+
+menu "Temperature policy"
+
+config SHU1_TARGET_TEMP_C
+    int "Default chamber target temperature"
+    default 50
+    range 0 60
+
+config SHU1_MAX_TARGET_TEMP_C
+    int "Maximum user chamber target temperature"
+    default 60
+    range 35 60
+    help
+        60 C is kept as hard user limit. Higher chamber temperatures may damage printer parts.
+
+config SHU1_OVERTEMP_C
+    int "Chamber emergency overtemperature cutoff"
+    default 70
+    range 45 90
+
+config SHU1_PTC_CUTOFF_C
+    int "PTC local cutoff temperature"
+    default 104
+    range 60 140
+
+config SHU1_FILTER_TRIGGER_BED_C
+    int "Default bed temp threshold for filter/fan in auto mode"
+    default 30
+    range 0 120
+
+config SHU1_HEATER_TRIGGER_BED_C
+    int "Default bed temp threshold for heater permission in auto mode"
+    default 80
+    range 30 120
+    help
+        Based on multi-version observations: filtertemp around 30 C and hotbedtemp around 80 C.
+        Tune for Snapmaker U1 after real testing.
+
+endmenu
+
+endmenu

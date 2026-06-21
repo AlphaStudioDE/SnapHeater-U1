@@ -1,0 +1,46 @@
+## v1.9.0-dev — BIN analysis and restore readiness
+
+- Added flash backup/restore documentation.
+- Added clean-room binary findings notes.
+- Added BIN analysis limits and hardware-verification checklist.
+
+# Changelog
+
+## v1.9.1-dev — Attribution and origin readiness
+
+- Added AUTHORS.md, NOTICE.md, PROJECT_ORIGIN.md and BRANDING_AND_ATTRIBUTION.md.
+- Added MIT SPDX headers to source files.
+- Clarified project origin, upstream authorship and fork attribution guidance.
+- Kept the project under MIT while documenting attribution expectations and contest/community clarity.
+
+
+## v1.8.0-dev — GitHub public package preparation
+
+- Added GitHub-oriented README.
+- Added Mermaid architecture diagrams.
+- Added dual-package structure in the release ZIP: working project and public GitHub project.
+- Added public-facing project highlights.
+- Added repository hygiene files such as `.gitignore`.
+- Removed internal research notes from the public folder.
+
+## v1.7.0-dev — Test readiness
+
+- Added central board configuration header.
+- Added feature matrix.
+- Added build and test plan.
+
+## Earlier development milestones
+
+The firmware skeleton includes the following major feature groups:
+
+- Snapmaker U1 / Moonraker integration
+- BLE control layer
+- Physical controls and status LEDs
+- Preheat, hold, drying and tempering workflows
+- Material-aware chamber logic
+- Anti-warp and large-print features
+- Safe overnight, safety latch and setup validation
+- Virtual door/open-lid detection
+- Heater health, filter life and energy estimate
+- Demo/showcase mode
+- U1 Symbiont Mode
