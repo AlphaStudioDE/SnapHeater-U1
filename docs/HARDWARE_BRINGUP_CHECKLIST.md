@@ -4,6 +4,9 @@ Use this checklist when the Panda Breath-style ESP32-C3 heater hardware is physi
 
 The goal is to move from an untouched device to a safe SnapHeater U1 test boot without energizing the heater unexpectedly.
 
+For the staged unlock criteria behind GPIO probe and normal heater output, see
+[SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md).
+
 ## Stop Conditions
 
 Stop immediately if any of these happen:
@@ -166,6 +169,7 @@ Only after board inspection:
 - Pulse fan first.
 - Confirm fan GPIO and active polarity.
 - Confirm fan can run without heater.
+- Follow Unlock Level L1 in [SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md).
 
 Suggested configuration:
 
@@ -194,6 +198,7 @@ Do not pulse the heater until all of these are true:
 - PTC sensor is valid.
 - Current path and power cutoff are understood.
 - Output Safety Latch status is understood.
+- Unlock Level L2 in [SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md) is satisfied.
 
 Suggested first heater pulse, only under supervision:
 
@@ -215,6 +220,7 @@ Before any normal heating:
 - Fault state clear.
 - Manual safe-off confirmed.
 - Safety score acceptable.
+- Unlock Level L3 in [SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md) is satisfied.
 
 Only after this should normal heater output be considered:
 

@@ -66,3 +66,5 @@ Firmware must not be the only safety layer. Use:
 5. Test fan pulse first.
 6. Test heater pulse only with supervision, current limiting and independent thermometer.
 7. Enable normal heater output only after confirming GPIO, polarity and sensors.
+
+For a stricter staged procedure, see [SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md).

@@ -5,6 +5,8 @@ to the first real Panda Breath / ESP32-C3 tests.
 
 For a bench checklist to use when hardware arrives, see
 [docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md).
+For the staged criteria to unlock probe and heater output features, see
+[docs/SAFETY_UNLOCK_PROCEDURE.md](docs/SAFETY_UNLOCK_PROCEDURE.md).
 
 ## Safety principles
 

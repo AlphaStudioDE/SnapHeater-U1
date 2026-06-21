@@ -175,6 +175,7 @@ Useful starting points:
 - [FEATURE_MATRIX.md](FEATURE_MATRIX.md) — feature readiness and test status
 - [BUILD_AND_TEST_PLAN.md](BUILD_AND_TEST_PLAN.md) — safe build and bring-up sequence
 - [docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md) — first physical hardware bring-up checklist
+- [docs/SAFETY_UNLOCK_PROCEDURE.md](docs/SAFETY_UNLOCK_PROCEDURE.md) — staged criteria for unlocking probe and heater output features
 - [docs/SYSTEM_DIAGRAMS.md](docs/SYSTEM_DIAGRAMS.md) — Mermaid diagrams
 - [main/board_panda_breath.h](main/board_panda_breath.h) — central board pin configuration
 
