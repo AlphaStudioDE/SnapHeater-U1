@@ -114,6 +114,8 @@ realistic budget cart: about 80-90 USD / 300-335 PLN
 
 The realistic budget cart assumes you do not choose the cheapest possible power supply, MOSFET module, wiring or thermal protection.
 
+DIY makes the most sense if you enjoy building, debugging and validating electronics, or if you want full control over the hardware. If you are not a DIY hardware enthusiast, a ready-made Panda Breath-style device is likely the better choice once its price drops below the realistic BOM cost above.
+
 If you are not comfortable working with DC power wiring, 12.5 A heater current, fuses, MOSFET drivers and thermal cutoff placement, use a ready-made heater device or ask a qualified person to review the build before powering it.
 
 ## What Not To Use
