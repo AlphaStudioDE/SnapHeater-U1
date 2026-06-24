@@ -71,7 +71,11 @@ fun SnapHeaterApp() {
     ) { tab ->
         when (tab) {
             AppTab.Dashboard -> DashboardScreen(snapshot)
-            AppTab.Modes -> ModesScreen(snapshot) { mode -> snapshot = snapshot.copy(mode = mode) }
+            AppTab.Modes -> ModesScreen(
+                snapshot = snapshot,
+                onMode = { mode -> snapshot = snapshot.copy(mode = mode) },
+                onTarget = { target -> snapshot = snapshot.copy(targetC = target) },
+            )
             AppTab.Safety -> SafetyScreen(snapshot)
             AppTab.Diagnostics -> DiagnosticsScreen(snapshot)
             AppTab.Settings -> SettingsScreen(snapshot) { target -> snapshot = snapshot.copy(targetC = target) }
