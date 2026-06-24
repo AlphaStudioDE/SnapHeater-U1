@@ -23,13 +23,14 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
-import com.alphastudio.snapheateru1.data.MockSnapHeaterRepository
+import com.alphastudio.snapheateru1.model.AppMode
 import com.alphastudio.snapheateru1.model.AppSession
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.screens.ConnectScreen
@@ -43,17 +44,20 @@ import com.alphastudio.snapheateru1.ui.theme.SnapHeaterTheme
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SnapHeaterApp() {
-    val repository = remember { MockSnapHeaterRepository() }
-    var appSession by remember { mutableStateOf(AppSession.Connect) }
-    var selectedTab by remember { mutableStateOf(AppTab.Dashboard) }
-    var snapshot by remember { mutableStateOf(repository.snapshot()) }
+    var appSessionName by rememberSaveable { mutableStateOf(AppSession.Connect.name) }
+    var selectedTabName by rememberSaveable { mutableStateOf(AppTab.Dashboard.name) }
+    var snapshot by rememberSaveable(stateSaver = HeaterSnapshotSaver) {
+        mutableStateOf(HeaterSnapshot(ble = "Demo mode"))
+    }
+    val appSession = AppSession.valueOf(appSessionName)
+    val selectedTab = AppTab.valueOf(selectedTabName)
 
     if (appSession == AppSession.Connect) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             ConnectScreen(
                 onDemoMode = {
-                    appSession = AppSession.Demo
-                    snapshot = repository.snapshot().copy(ble = "Demo mode")
+                    appSessionName = AppSession.Demo.name
+                    snapshot = snapshot.copy(ble = "Demo mode")
                 },
             )
         }
@@ -63,14 +67,14 @@ fun SnapHeaterApp() {
     SnapHeaterScaffold(
         selectedTab = selectedTab,
         snapshot = snapshot,
-        onTab = { selectedTab = it },
+        onTab = { selectedTabName = it.name },
     ) { tab ->
         when (tab) {
             AppTab.Dashboard -> DashboardScreen(snapshot)
-            AppTab.Modes -> ModesScreen(snapshot) { mode -> snapshot = repository.setMode(mode) }
+            AppTab.Modes -> ModesScreen(snapshot) { mode -> snapshot = snapshot.copy(mode = mode) }
             AppTab.Safety -> SafetyScreen(snapshot)
             AppTab.Diagnostics -> DiagnosticsScreen(snapshot)
-            AppTab.Settings -> SettingsScreen(snapshot) { target -> snapshot = repository.setTarget(target) }
+            AppTab.Settings -> SettingsScreen(snapshot) { target -> snapshot = snapshot.copy(targetC = target) }
         }
     }
 }
@@ -127,3 +131,36 @@ private fun AppPreview() {
         SnapHeaterApp()
     }
 }
+
+private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
+    save = { snapshot ->
+        listOf(
+            snapshot.chamberC,
+            snapshot.ptcC,
+            snapshot.targetC,
+            snapshot.safetyScore,
+            snapshot.heaterLocked,
+            snapshot.gpioProbeLocked,
+            snapshot.fanOn,
+            snapshot.moonraker,
+            snapshot.ble,
+            snapshot.material,
+            snapshot.mode.name,
+        )
+    },
+    restore = { values ->
+        HeaterSnapshot(
+            chamberC = values[0] as Int,
+            ptcC = values[1] as Int,
+            targetC = values[2] as Int,
+            safetyScore = values[3] as Int,
+            heaterLocked = values[4] as Boolean,
+            gpioProbeLocked = values[5] as Boolean,
+            fanOn = values[6] as Boolean,
+            moonraker = values[7] as String,
+            ble = values[8] as String,
+            material = values[9] as String,
+            mode = AppMode.valueOf(values[10] as String),
+        )
+    },
+)

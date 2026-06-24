@@ -2,6 +2,7 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Preserved Android app session, tab and mock state across screen rotation.
 - Restored semantic status colors for Android temperature and safety values.
 - Reworked the Android app palette toward black, white and orange SnapScreen-style visuals.
 - Added the Android app connection entry screen with Demo mode flow.
