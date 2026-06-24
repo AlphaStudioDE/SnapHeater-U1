@@ -21,11 +21,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -40,7 +35,7 @@ import com.alphastudio.snapheateru1.ui.theme.StatusColors
 fun ModesScreen(
     snapshot: HeaterSnapshot,
     onMode: (AppMode) -> Unit,
-    onTarget: (Int) -> Unit,
+    onSnapshotChange: (HeaterSnapshot) -> Unit,
 ) {
     ScreenColumn {
         SectionTitle("Modes", "Choose a workflow. Unsafe outputs stay blocked in mock and locked firmware states.")
@@ -60,7 +55,10 @@ fun ModesScreen(
                     Text(mode.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Text(mode.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (selected) {
-                        ModeSettingsPanel(snapshot = snapshot, onTarget = onTarget)
+                        ModeSettingsPanel(
+                            snapshot = snapshot,
+                            onSnapshotChange = onSnapshotChange,
+                        )
                         Button(onClick = { onMode(AppMode.SafeStop) }, modifier = Modifier.fillMaxWidth()) {
                             Text("Safe stop")
                         }
@@ -78,41 +76,57 @@ fun ModesScreen(
 @Composable
 private fun ModeSettingsPanel(
     snapshot: HeaterSnapshot,
-    onTarget: (Int) -> Unit,
+    onSnapshotChange: (HeaterSnapshot) -> Unit,
 ) {
-    var fanAssist by rememberSaveable { mutableStateOf(false) }
-    var durationMinutes by rememberSaveable(snapshot.mode.name) { mutableFloatStateOf(defaultDuration(snapshot.mode).toFloat()) }
-
     Column(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
     ) {
         Text("Mode settings", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        StatusRow("Saved state", snapshot.lastConfirmedSettings, valueColor = confirmColor(snapshot))
 
         when (snapshot.mode) {
             AppMode.AutoStandby -> {
                 StatusRow("Printer awareness", "Moonraker read-only", valueColor = StatusColors.Warning)
                 StatusRow("Material profile", snapshot.material)
-                TargetSlider(snapshot.targetC, onTarget)
+                TargetSlider(snapshot.targetC) {
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                }
             }
             AppMode.ManualHold -> {
-                TargetSlider(snapshot.targetC, onTarget)
-                ToggleRow("Fan assist", fanAssist) { fanAssist = it }
+                TargetSlider(snapshot.targetC) {
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                }
+                ToggleRow("Fan assist", snapshot.manualFanAssist) {
+                    onSnapshotChange(snapshot.copy(manualFanAssist = it).pendingSettings())
+                }
                 StatusRow("Runtime guard", "Enabled", valueColor = StatusColors.Good)
             }
             AppMode.Preheat -> {
-                TargetSlider(snapshot.targetC, onTarget)
-                DurationSlider("Heat soak", durationMinutes, 5f..45f) { durationMinutes = it }
+                TargetSlider(snapshot.targetC) {
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                }
+                DurationSlider("Heat soak", snapshot.preheatHeatSoakMin, 5f..45f) {
+                    onSnapshotChange(snapshot.copy(preheatHeatSoakMin = it).pendingSettings())
+                }
                 StatusRow("Start condition", "Manual confirm", valueColor = StatusColors.Warning)
             }
             AppMode.Drying -> {
-                TargetSlider(snapshot.targetC, onTarget)
-                DurationSlider("Drying time", durationMinutes, 30f..360f) { durationMinutes = it }
+                TargetSlider(snapshot.targetC) {
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                }
+                DurationSlider("Drying time", snapshot.dryingTimeMin, 30f..360f) {
+                    onSnapshotChange(snapshot.copy(dryingTimeMin = it).pendingSettings())
+                }
                 StatusRow("Profile", snapshot.material)
             }
             AppMode.Tempering -> {
-                DurationSlider("Cooldown time", durationMinutes, 10f..180f) { durationMinutes = it }
-                TargetSlider(snapshot.targetC, onTarget)
+                DurationSlider("Cooldown time", snapshot.temperingDurationMin, 10f..180f) {
+                    onSnapshotChange(snapshot.copy(temperingDurationMin = it).pendingSettings())
+                }
+                TargetSlider(snapshot.targetC) {
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                }
                 StatusRow("Ramp behavior", "Controlled cooldown", valueColor = StatusColors.Good)
             }
             AppMode.SafeStop -> {
@@ -124,6 +138,17 @@ private fun ModeSettingsPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+
+        Button(
+            onClick = {
+                onSnapshotChange(
+                    snapshot.copy(lastConfirmedSettings = confirmedSummary(snapshot)),
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Confirm settings")
         }
     }
 }
@@ -142,14 +167,14 @@ private fun TargetSlider(targetC: Int, onTarget: (Int) -> Unit) {
 @Composable
 private fun DurationSlider(
     label: String,
-    value: Float,
+    value: Int,
     range: ClosedFloatingPointRange<Float>,
-    onValue: (Float) -> Unit,
+    onValue: (Int) -> Unit,
 ) {
-    Text("$label: ${value.toInt()} min", color = StatusColors.Normal, fontWeight = FontWeight.Bold)
+    Text("$label: $value min", color = StatusColors.Normal, fontWeight = FontWeight.Bold)
     Slider(
-        value = value,
-        onValueChange = onValue,
+        value = value.toFloat(),
+        onValueChange = { onValue(it.toInt()) },
         valueRange = range,
         steps = ((range.endInclusive - range.start) / 5f).toInt().coerceAtLeast(0),
     )
@@ -163,11 +188,17 @@ private fun ToggleRow(label: String, checked: Boolean, onChecked: (Boolean) -> U
     }
 }
 
-private fun defaultDuration(mode: AppMode): Int = when (mode) {
-    AppMode.AutoStandby -> 0
-    AppMode.ManualHold -> 0
-    AppMode.Preheat -> 15
-    AppMode.Drying -> 120
-    AppMode.Tempering -> 45
-    AppMode.SafeStop -> 0
+private fun confirmColor(snapshot: HeaterSnapshot) =
+    if (snapshot.lastConfirmedSettings.startsWith(snapshot.mode.label)) StatusColors.Good else StatusColors.Warning
+
+private fun HeaterSnapshot.pendingSettings() =
+    copy(lastConfirmedSettings = "Pending ${mode.label} settings")
+
+private fun confirmedSummary(snapshot: HeaterSnapshot): String = when (snapshot.mode) {
+    AppMode.AutoStandby -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C"
+    AppMode.ManualHold -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C / fan ${if (snapshot.manualFanAssist) "on" else "off"}"
+    AppMode.Preheat -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C / soak ${snapshot.preheatHeatSoakMin} min"
+    AppMode.Drying -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C / ${snapshot.dryingTimeMin} min"
+    AppMode.Tempering -> "${snapshot.mode.label} confirmed / ${snapshot.temperingDurationMin} min / target ${snapshot.targetC} C"
+    AppMode.SafeStop -> "${snapshot.mode.label} confirmed / heater locked"
 }

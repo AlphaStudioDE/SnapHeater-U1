@@ -10,7 +10,7 @@ Status and temperature colors remain semantic: green means OK, red means fault/d
 
 - Connect: search for a SnapHeater U1 device or enter Demo mode.
 - Status: chamber state, target, PTC temperature, fan, BLE and Moonraker status.
-- Modes: Auto standby, Manual hold, Preheat, Drying, Tempering and Safe stop with mode-specific settings shown after selection.
+- Modes: Auto standby, Manual hold, Preheat, Drying, Tempering and Safe stop with mode-specific settings shown after selection, persisted while navigating, and finalized through an explicit confirmation action.
 - Safety: checklist mirror for staged firmware and hardware validation.
 - Diagnostics: BLE contract identifiers, mock firmware channel and event log.
 - Settings: target temperature, material profile and local-only preferences.
