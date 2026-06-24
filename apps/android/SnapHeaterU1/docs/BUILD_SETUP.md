@@ -18,7 +18,7 @@ Current app status: Jetpack Compose UI prototype with mock SnapHeater U1 data. B
 
 Open `apps/android/SnapHeaterU1` in Android Studio and let Gradle sync.
 
-If a Gradle Wrapper is available, the command-line build should be:
+The project includes a Gradle Wrapper. The command-line build is:
 
 ```bash
 ./gradlew assembleDebug
@@ -30,22 +30,9 @@ On Windows:
 .\gradlew.bat assembleDebug
 ```
 
-## Current repository note
+## Local SDK note
 
-The repository currently contains the Gradle project files, but no committed Gradle Wrapper. If the project is opened in Android Studio first, the wrapper can be generated from the IDE or with:
-
-```bash
-gradle wrapper
-```
-
-After the wrapper exists, commit these files:
-
-```text
-gradlew
-gradlew.bat
-gradle/wrapper/gradle-wrapper.jar
-gradle/wrapper/gradle-wrapper.properties
-```
+Do not commit `local.properties`. It should point to the SDK location on the current machine only.
 
 ## Safety boundary
 
