@@ -4,7 +4,7 @@ SnapHeater U1 is an open project shaped by testing ideas, feedback, practical di
 
 Special thanks to:
 
-- **wildtang3nt** - for providing a flash memory dump used during early layout and restore analysis.
+- **[@justinh-rahb](https://github.com/justinh-rahb)** - for providing a flash memory dump used during early layout and restore analysis.
 - **wlodeka** - for technical and subject-matter support during project development.
 
 Thank you for being part of the project and helping move it forward.
