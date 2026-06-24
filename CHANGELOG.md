@@ -2,6 +2,7 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Expanded the Android app shell to cover the current firmware feature surface and added a firmware-to-app map.
 - Added mode-specific Android settings panels after selecting a workflow.
 - Preserved Android app session, tab and mock state across screen rotation.
 - Restored semantic status colors for Android temperature and safety values.

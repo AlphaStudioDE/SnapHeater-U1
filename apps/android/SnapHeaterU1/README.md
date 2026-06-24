@@ -20,6 +20,7 @@ Current status: SnapScreen-like UI prototype with mock firmware data. BLE integr
 - `app/src/main/java/.../ble`: provisional BLE identifiers and integration boundary.
 - `app/src/main/java/.../ui`: Compose app shell, screens, components and theme.
 - `docs/UI_FLOW.md`: mobile UX flow and safety boundary.
+- `docs/FIRMWARE_APP_MAP.md`: mapping between firmware features and Android UI coverage.
 
 ## Open In Android Studio
 

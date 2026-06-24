@@ -33,9 +33,9 @@ fun SafetyScreen(snapshot: HeaterSnapshot) {
 
         SafetyStep("Firmware built with heater output disabled", true)
         SafetyStep("GPIO probe confirms expected pins", !snapshot.gpioProbeLocked)
-        SafetyStep("Independent thermal cutoff installed", false)
-        SafetyStep("Fan fail test completed", false)
-        SafetyStep("Moonraker command scope reviewed", false)
+        SafetyStep("Independent thermal cutoff installed", snapshot.setupValidationPassed)
+        SafetyStep("Fan fail test completed", snapshot.setupValidationPassed)
+        SafetyStep("Moonraker command scope reviewed", snapshot.moonraker.contains("read", ignoreCase = true))
 
         Card(
             shape = RoundedCornerShape(8.dp),
@@ -53,8 +53,31 @@ fun SafetyScreen(snapshot: HeaterSnapshot) {
                     valueColor = if (snapshot.heaterLocked) StatusColors.Good else StatusColors.Warning,
                 )
                 StatusRow("Readiness", "${snapshot.safetyScore}%", valueColor = safetyColor(snapshot.safetyScore))
+                StatusRow("Setup validation", if (snapshot.setupValidationPassed) "Passed" else "Pending", valueColor = if (snapshot.setupValidationPassed) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Output latch", if (snapshot.outputSafetyLatchArmed) "Armed" else "Not armed", valueColor = if (snapshot.outputSafetyLatchArmed) StatusColors.Warning else StatusColors.Good)
                 Text(
                     "This screen documents readiness only. Unlocking remains a firmware configuration and hardware validation decision.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+            ) {
+                Text("Output Safety Latch workflow", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                StatusRow("Sensors verified", if (snapshot.setupValidationPassed) "Yes" else "No", valueColor = if (snapshot.setupValidationPassed) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Fan verified", if (snapshot.setupValidationPassed) "Yes" else "No", valueColor = if (snapshot.setupValidationPassed) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Heater verified", if (snapshot.heaterLocked) "Locked" else "User enabled", valueColor = if (snapshot.heaterLocked) StatusColors.Good else StatusColors.Warning)
+                StatusRow("GPIO probe", if (snapshot.gpioProbeLocked) "Build locked" else "Probe build", valueColor = if (snapshot.gpioProbeLocked) StatusColors.Good else StatusColors.Warning)
+                Text(
+                    "The app should require explicit user acknowledgement before any future BLE/REST arm_output_safety_latch write.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -70,6 +70,42 @@ fun DashboardScreen(snapshot: HeaterSnapshot) {
             }
         }
 
+        Card(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+            ) {
+                SectionTitle("Printer and chamber intelligence", "Read-only U1 context with warning-first decisions")
+                StatusRow("Printer", snapshot.printerState, valueColor = StatusColors.Normal)
+                StatusRow("Progress", "${snapshot.printProgressPct}%")
+                StatusRow("Active material", snapshot.activeMaterial)
+                StatusRow("Warm-up ETA", "${snapshot.warmupEtaMin} min", valueColor = StatusColors.Warning)
+                StatusRow("Heat soak", if (snapshot.heatSoakReady) "Ready" else "Waiting", valueColor = if (snapshot.heatSoakReady) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Stability", "${snapshot.stabilityScore}%", valueColor = safetyColor(snapshot.stabilityScore))
+                StatusRow("Print risk", "${snapshot.printRiskScore}% / ${snapshot.printRiskMessage}", valueColor = riskColor(snapshot.printRiskScore))
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+            ) {
+                SectionTitle("Post-print and service", "Firmware feature state that the app must surface")
+                StatusRow("Virtual door", if (snapshot.virtualDoorOpen) "Open detected" else "No event", valueColor = if (snapshot.virtualDoorOpen) StatusColors.Warning else StatusColors.Good)
+                StatusRow("Filter life used", "${snapshot.filterLifePct}%", valueColor = serviceColor(snapshot.filterLifePct))
+                StatusRow("Heater wear", "${snapshot.heaterWearPct}%", valueColor = serviceColor(snapshot.heaterWearPct))
+                StatusRow("Session energy", "${snapshot.sessionEnergyWh} Wh")
+                StatusRow("Estimated total", "${snapshot.estimatedEnergyWh} Wh")
+            }
+        }
+
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusPill(snapshot.ble, StatusColors.Normal)
             StatusPill(
@@ -104,4 +140,16 @@ private fun safetyColor(score: Int) = when {
     score >= 80 -> StatusColors.Good
     score >= 50 -> StatusColors.Warning
     else -> StatusColors.Danger
+}
+
+private fun riskColor(score: Int) = when {
+    score >= 70 -> StatusColors.Danger
+    score >= 40 -> StatusColors.Warning
+    else -> StatusColors.Good
+}
+
+private fun serviceColor(percent: Int) = when {
+    percent >= 90 -> StatusColors.Danger
+    percent >= 70 -> StatusColors.Warning
+    else -> StatusColors.Good
 }

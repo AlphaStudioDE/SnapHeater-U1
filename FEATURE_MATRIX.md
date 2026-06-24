@@ -31,7 +31,7 @@ Legend:
 | Wi-Fi STA | Yes | Config | Yes | No | No | Optional | Credentials can be provisioned later. |
 | Local REST API | Yes | REST | Yes | No | No | No | Status/settings/events/probe foundation. |
 | BLE GATT control | Yes | BLE | Yes | No | No | Yes | Android app not yet implemented. |
-| Android companion app UI | Skeleton | Mock data | Not locally verified | No | No | In progress | Compose UI shell split into screens/components/theme; BLE integration pending. |
+| Android companion app UI | UI shell | Mock data | Yes | No | No | In progress | Feature-surface UI shell exists; BLE integration pending. |
 | iOS companion app UI | Planned | N/A | No | No | No | Yes | Target documented; no Xcode project yet. |
 | BLE PIN unlock | Yes | BLE | Yes | No | No | Yes | App-level lock; not final production pairing. |
 | Snapmaker U1 Moonraker read integration | Yes | Status | Yes | No | Yes | Optional | Uses U1-specific fields from coroNET reference. |

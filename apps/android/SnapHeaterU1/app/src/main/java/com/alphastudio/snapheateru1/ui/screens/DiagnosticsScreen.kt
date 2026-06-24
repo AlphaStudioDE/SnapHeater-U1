@@ -24,6 +24,7 @@ import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.components.SectionTitle
 import com.alphastudio.snapheateru1.ui.components.StatusRow
+import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
 @Composable
 fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
@@ -41,7 +42,9 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 StatusRow("Device name", SnapHeaterBleContract.DeviceName)
                 StatusRow("BLE state", snapshot.ble)
                 StatusRow("Service", SnapHeaterBleContract.ServiceUuid.toString().take(13) + "...")
+                StatusRow("Firmware", snapshot.firmwareVersion)
                 StatusRow("Firmware channel", "Mock")
+                StatusRow("Moonraker", snapshot.moonraker, valueColor = StatusColors.Warning)
             }
         }
 
@@ -57,6 +60,25 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 LogLine("00:01", "App started in mock repository mode")
                 LogLine("00:03", "Safety state loaded: heater locked")
                 LogLine("00:08", "Moonraker bridge unavailable in prototype")
+                LogLine("00:11", "Temperature history enabled: ${snapshot.tempHistoryEnabled}")
+                LogLine("00:13", "Incident reports enabled: ${snapshot.incidentReportEnabled}")
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+            ) {
+                Text("Reports and maintenance", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                StatusRow("Temperature history", if (snapshot.tempHistoryEnabled) "Enabled" else "Disabled", valueColor = if (snapshot.tempHistoryEnabled) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Incident report", if (snapshot.incidentReportEnabled) "Enabled" else "Disabled", valueColor = if (snapshot.incidentReportEnabled) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Airflow warning", if (snapshot.airflowWarningPending) "Pending" else "Clear", valueColor = if (snapshot.airflowWarningPending) StatusColors.Warning else StatusColors.Good)
+                StatusRow("Filter warning", if (snapshot.filterWarningPending) "Pending" else "Clear", valueColor = if (snapshot.filterWarningPending) StatusColors.Warning else StatusColors.Good)
+                StatusRow("OTA rollback", if (snapshot.otaRollbackReady) "Available" else "Placeholder")
             }
         }
     }

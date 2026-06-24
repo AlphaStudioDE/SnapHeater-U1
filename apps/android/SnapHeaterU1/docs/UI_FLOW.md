@@ -15,6 +15,8 @@ Status and temperature colors remain semantic: green means OK, red means fault/d
 - Diagnostics: BLE contract identifiers, mock firmware channel and event log.
 - Settings: target temperature, material profile and local-only preferences.
 
+Feature coverage is tracked in [FIRMWARE_APP_MAP.md](FIRMWARE_APP_MAP.md).
+
 ## Language Plan
 
 English is the primary UI language. Polish and German string resources are included so the app can move toward EN/PL/DE without changing the project structure later.
