@@ -2,6 +2,7 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Reworked the Android app palette toward black, white and orange SnapScreen-style visuals.
 - Added the Android app connection entry screen with Demo mode flow.
 - Added the Android Gradle Wrapper and verified `assembleDebug` with a local Android SDK.
 - Added Android app build setup notes for the first local Gradle sync/build.

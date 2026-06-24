@@ -2,6 +2,8 @@
 
 The mobile app follows a SnapScreen-like control layout: direct status first, bottom navigation for primary areas, compact operational panels, and no cloud dependency.
 
+The visual palette is intentionally restrained: black background, white text, neutral dark panels and orange heat/control accents.
+
 ## Primary Navigation
 
 - Connect: search for a SnapHeater U1 device or enter Demo mode.
