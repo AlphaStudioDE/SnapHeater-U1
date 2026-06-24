@@ -30,7 +30,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
 import com.alphastudio.snapheateru1.data.MockSnapHeaterRepository
+import com.alphastudio.snapheateru1.model.AppSession
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
+import com.alphastudio.snapheateru1.ui.screens.ConnectScreen
 import com.alphastudio.snapheateru1.ui.screens.DashboardScreen
 import com.alphastudio.snapheateru1.ui.screens.DiagnosticsScreen
 import com.alphastudio.snapheateru1.ui.screens.ModesScreen
@@ -42,8 +44,21 @@ import com.alphastudio.snapheateru1.ui.theme.SnapHeaterTheme
 @Composable
 fun SnapHeaterApp() {
     val repository = remember { MockSnapHeaterRepository() }
+    var appSession by remember { mutableStateOf(AppSession.Connect) }
     var selectedTab by remember { mutableStateOf(AppTab.Dashboard) }
     var snapshot by remember { mutableStateOf(repository.snapshot()) }
+
+    if (appSession == AppSession.Connect) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            ConnectScreen(
+                onDemoMode = {
+                    appSession = AppSession.Demo
+                    snapshot = repository.snapshot().copy(ble = "Demo mode")
+                },
+            )
+        }
+        return
+    }
 
     SnapHeaterScaffold(
         selectedTab = selectedTab,
@@ -74,7 +89,11 @@ private fun SnapHeaterScaffold(
                 title = {
                     Column {
                         Text("SnapHeater U1", fontWeight = FontWeight.Bold)
-                        Text(snapshot.mode.label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "${snapshot.ble} / ${snapshot.mode.label}",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),

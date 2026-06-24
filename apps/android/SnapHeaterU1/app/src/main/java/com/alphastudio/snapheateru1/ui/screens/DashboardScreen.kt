@@ -62,7 +62,8 @@ fun DashboardScreen(snapshot: HeaterSnapshot) {
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusPill(snapshot.ble, MaterialTheme.colorScheme.secondary)
             StatusPill(if (snapshot.gpioProbeLocked) "GPIO probe locked" else "GPIO probe passed")
             StatusPill("Local control only", MaterialTheme.colorScheme.primary)
         }

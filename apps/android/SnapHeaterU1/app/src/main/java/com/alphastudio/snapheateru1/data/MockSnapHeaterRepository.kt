@@ -10,7 +10,7 @@ import com.alphastudio.snapheateru1.model.AppMode
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 
 class MockSnapHeaterRepository : SnapHeaterRepository {
-    private var state = HeaterSnapshot()
+    private var state = HeaterSnapshot(ble = "Demo mode")
 
     override fun snapshot(): HeaterSnapshot = state
 

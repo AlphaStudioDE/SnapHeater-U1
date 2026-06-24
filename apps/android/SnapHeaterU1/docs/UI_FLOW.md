@@ -4,6 +4,7 @@ The mobile app follows a SnapScreen-like control layout: direct status first, bo
 
 ## Primary Navigation
 
+- Connect: search for a SnapHeater U1 device or enter Demo mode.
 - Status: chamber state, target, PTC temperature, fan, BLE and Moonraker status.
 - Modes: Auto standby, Manual hold, Preheat, Drying, Tempering and Safe stop.
 - Safety: checklist mirror for staged firmware and hardware validation.
