@@ -4,6 +4,8 @@ The mobile app follows a SnapScreen-like control layout: direct status first, bo
 
 The visual palette is intentionally restrained: black background, white text, neutral dark panels and orange heat/control accents.
 
+Status and temperature colors remain semantic: green means OK, red means fault/danger, white means normal and orange means warning or action.
+
 ## Primary Navigation
 
 - Connect: search for a SnapHeater U1 device or enter Demo mode.

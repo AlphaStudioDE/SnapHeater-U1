@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alphastudio.snapheateru1.ui.components.StatusPill
+import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
 @Composable
 fun ConnectScreen(
@@ -56,7 +57,7 @@ fun ConnectScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(modifier = Modifier.height(8.dp))
-        StatusPill("Local only", MaterialTheme.colorScheme.secondary)
+        StatusPill("Local only", StatusColors.Normal)
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("SnapHeater U1", fontSize = 34.sp, fontWeight = FontWeight.Bold)
@@ -84,7 +85,7 @@ fun ConnectScreen(
                     )
                     Column {
                         Text("Device connection", fontWeight = FontWeight.Bold)
-                        Text(scanState, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(scanState, color = if (scanState == "Ready") StatusColors.Normal else StatusColors.Warning)
                     }
                 }
 
@@ -120,7 +121,7 @@ fun ConnectScreen(
                 Icon(
                     Icons.Filled.Security,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.tertiary,
+                    tint = StatusColors.Good,
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text("Safety locked", fontWeight = FontWeight.Bold)

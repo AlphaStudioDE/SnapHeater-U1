@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
 @Composable
 fun ScreenColumn(content: @Composable ColumnScope.() -> Unit) {
@@ -52,7 +53,7 @@ fun SectionTitle(title: String, subtitle: String? = null) {
 }
 
 @Composable
-fun MetricTile(label: String, value: String, detail: String, accent: Color = MaterialTheme.colorScheme.primary) {
+fun MetricTile(label: String, value: String, detail: String, accent: Color = StatusColors.Normal) {
     Card(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -69,19 +70,28 @@ fun MetricTile(label: String, value: String, detail: String, accent: Color = Mat
 }
 
 @Composable
-fun StatusRow(label: String, value: String, strong: Boolean = false) {
+fun StatusRow(
+    label: String,
+    value: String,
+    strong: Boolean = false,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontWeight = if (strong) FontWeight.Bold else FontWeight.Medium)
+        Text(
+            value,
+            color = valueColor,
+            fontWeight = if (strong) FontWeight.Bold else FontWeight.Medium,
+        )
     }
 }
 
 @Composable
-fun StatusPill(text: String, color: Color = MaterialTheme.colorScheme.secondary) {
+fun StatusPill(text: String, color: Color = StatusColors.Normal) {
     Surface(
         shape = RoundedCornerShape(999.dp),
         border = BorderStroke(1.dp, color.copy(alpha = 0.6f)),

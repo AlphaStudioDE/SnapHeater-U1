@@ -24,6 +24,7 @@ import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.components.SectionTitle
 import com.alphastudio.snapheateru1.ui.components.StatusRow
+import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
 @Composable
 fun SafetyScreen(snapshot: HeaterSnapshot) {
@@ -45,8 +46,13 @@ fun SafetyScreen(snapshot: HeaterSnapshot) {
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
                 Text("Current gate", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                StatusRow("Heater output", if (snapshot.heaterLocked) "Locked" else "Available", strong = true)
-                StatusRow("Readiness", "${snapshot.safetyScore}%")
+                StatusRow(
+                    "Heater output",
+                    if (snapshot.heaterLocked) "Locked" else "Available",
+                    strong = true,
+                    valueColor = if (snapshot.heaterLocked) StatusColors.Good else StatusColors.Warning,
+                )
+                StatusRow("Readiness", "${snapshot.safetyScore}%", valueColor = safetyColor(snapshot.safetyScore))
                 Text(
                     "This screen documents readiness only. Unlocking remains a firmware configuration and hardware validation decision.",
                     style = MaterialTheme.typography.bodySmall,
@@ -68,7 +74,13 @@ private fun SafetyStep(label: String, checked: Boolean) {
             modifier = Modifier.fillMaxWidth().padding(10.dp),
         ) {
             Checkbox(checked = checked, onCheckedChange = null)
-            Text(label, modifier = Modifier.weight(1f))
+            Text(label, modifier = Modifier.weight(1f), color = if (checked) StatusColors.Good else StatusColors.Warning)
         }
     }
+}
+
+private fun safetyColor(score: Int) = when {
+    score >= 80 -> StatusColors.Good
+    score >= 50 -> StatusColors.Warning
+    else -> StatusColors.Danger
 }

@@ -27,18 +27,19 @@ import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.components.SectionTitle
 import com.alphastudio.snapheateru1.ui.components.StatusPill
 import com.alphastudio.snapheateru1.ui.components.StatusRow
+import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
 @Composable
 fun DashboardScreen(snapshot: HeaterSnapshot) {
     ScreenColumn {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricTile("Chamber", "${snapshot.chamberC} C", "Current enclosure temperature")
-                MetricTile("Target", "${snapshot.targetC} C", "Active target limit", MaterialTheme.colorScheme.secondary)
+                MetricTile("Chamber", "${snapshot.chamberC} C", "Current enclosure temperature", chamberColor(snapshot))
+                MetricTile("Target", "${snapshot.targetC} C", "Active target limit", StatusColors.Warning)
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricTile("PTC", "${snapshot.ptcC} C", "Heater body sensor", MaterialTheme.colorScheme.tertiary)
-                MetricTile("Safety", "${snapshot.safetyScore}%", "Validation readiness")
+                MetricTile("PTC", "${snapshot.ptcC} C", "Heater body sensor", ptcColor(snapshot.ptcC))
+                MetricTile("Safety", "${snapshot.safetyScore}%", "Validation readiness", safetyColor(snapshot.safetyScore))
             }
         }
 
@@ -52,20 +53,30 @@ fun DashboardScreen(snapshot: HeaterSnapshot) {
             ) {
                 SectionTitle("Live state", "Mock data until BLE is validated on real hardware")
                 StatusRow("BLE", snapshot.ble, strong = true)
-                StatusRow("Moonraker", snapshot.moonraker)
-                StatusRow("Fan", if (snapshot.fanOn) "On" else "Off")
-                StatusRow("Heater output", if (snapshot.heaterLocked) "Locked" else "Available", strong = true)
+                StatusRow("Moonraker", snapshot.moonraker, valueColor = StatusColors.Warning)
+                StatusRow("Fan", if (snapshot.fanOn) "On" else "Off", valueColor = if (snapshot.fanOn) StatusColors.Good else StatusColors.Normal)
+                StatusRow(
+                    "Heater output",
+                    if (snapshot.heaterLocked) "Locked" else "Available",
+                    strong = true,
+                    valueColor = if (snapshot.heaterLocked) StatusColors.Good else StatusColors.Warning,
+                )
                 LinearProgressIndicator(
                     progress = { snapshot.safetyScore / 100f },
                     modifier = Modifier.fillMaxWidth(),
+                    color = safetyColor(snapshot.safetyScore),
+                    trackColor = MaterialTheme.colorScheme.outlineVariant,
                 )
             }
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatusPill(snapshot.ble, MaterialTheme.colorScheme.secondary)
-            StatusPill(if (snapshot.gpioProbeLocked) "GPIO probe locked" else "GPIO probe passed")
-            StatusPill("Local control only", MaterialTheme.colorScheme.primary)
+            StatusPill(snapshot.ble, StatusColors.Normal)
+            StatusPill(
+                if (snapshot.gpioProbeLocked) "GPIO probe locked" else "GPIO probe passed",
+                if (snapshot.gpioProbeLocked) StatusColors.Warning else StatusColors.Good,
+            )
+            StatusPill("Local control only", StatusColors.Normal)
         }
 
         Text(
@@ -75,4 +86,22 @@ fun DashboardScreen(snapshot: HeaterSnapshot) {
             fontWeight = FontWeight.Medium,
         )
     }
+}
+
+private fun chamberColor(snapshot: HeaterSnapshot) = when {
+    snapshot.chamberC >= snapshot.targetC - 2 && snapshot.chamberC <= snapshot.targetC + 2 -> StatusColors.Good
+    snapshot.chamberC > snapshot.targetC + 5 -> StatusColors.Warning
+    else -> StatusColors.Normal
+}
+
+private fun ptcColor(ptcC: Int) = when {
+    ptcC >= 90 -> StatusColors.Danger
+    ptcC >= 75 -> StatusColors.Warning
+    else -> StatusColors.Normal
+}
+
+private fun safetyColor(score: Int) = when {
+    score >= 80 -> StatusColors.Good
+    score >= 50 -> StatusColors.Warning
+    else -> StatusColors.Danger
 }
