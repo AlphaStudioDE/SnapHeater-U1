@@ -11,7 +11,8 @@ For the staged criteria to unlock probe and heater output features, see
 ## Safety principles
 
 1. Do not enable normal heater output during the first build.
-2. Do not rely on inferred GPIOs without PCB verification.
+2. Use the accepted Panda Breath GPIO map, but keep live heater output locked
+   until bench tests pass.
 3. Keep `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n` until fan, heater, sensors and
    output polarity are confirmed.
 4. Use GPIO Probe mode only for short, supervised tests.
@@ -41,27 +42,28 @@ CONFIG_SHU1_ENABLE_BLE=y
 CONFIG_SHU1_ENABLE_PHYSICAL_CONTROLS=y
 CONFIG_SHU1_HEATER_GPIO=18
 CONFIG_SHU1_FAN_GPIO=3
+CONFIG_SHU1_ZERO_CROSS_GPIO=7
 CONFIG_SHU1_CHAMBER_ADC_CH=0
 CONFIG_SHU1_PTC_ADC_CH=1
 ```
 
-Detailed buttons and LEDs should remain `-1` until verified. Current hardware
-candidates for later PCB checks are:
+Detailed button actions should remain `-1` until K1/K2/K3 behavior is mapped to
+SnapHeater actions. Current accepted hardware pins are:
 
 ```txt
-GPIO18 = PTC relay / heater output candidate
-GPIO3  = fan TRIAC gate candidate
-GPIO7  = zero-cross detector candidate, shared with K1 button behavior
-GPIO0  = chamber/warehouse NTC ADC candidate, also shared with K2 button net
-GPIO1  = PTC element NTC ADC candidate
-GPIO2  = K3 button candidate
-GPIO6  = K1 LED candidate
-GPIO5  = K2 LED candidate
-GPIO4  = K3 LED candidate
+GPIO18 = PTC relay / heater output
+GPIO3  = fan TRIAC gate
+GPIO7  = zero-cross detector, shared with K1 behavior
+GPIO0  = chamber/warehouse NTC ADC, also shared with K2 button net
+GPIO1  = PTC element NTC ADC
+GPIO2  = K3 button net
+GPIO6  = K1 LED
+GPIO5  = K2 LED
+GPIO4  = K3 LED
 ```
 
-Do not enable any shared button/LED behavior until the sensor and zero-cross
-roles are understood on the real PCB.
+Do not enable shared button behavior until GPIO7 zero-cross handling and
+GPIO0/GPIO1 sensor ownership are preserved.
 
 ## Phase 2: Flash without heater output
 
@@ -149,11 +151,11 @@ Before GPIO Probe:
 - identify fan connector,
 - identify sensor connectors,
 - identify MOSFET/driver path,
-- verify GPIO18 continuity to the PTC relay driver path,
-- verify GPIO3 continuity to the fan TRIAC gate driver path,
-- verify GPIO7 zero-cross input behavior,
-- verify GPIO0/GPIO1 sensor nets before using them for any other role,
-- check whether output drivers are active-high or active-low,
+- confirm GPIO18 PTC relay driver behavior,
+- confirm GPIO3 fan TRIAC gate behavior,
+- confirm GPIO7 zero-cross input behavior,
+- confirm GPIO0/GPIO1 sensor behavior before using shared button nets,
+- check output behavior against accepted active-high defaults,
 - verify whether the fan can run before/with heater.
 
 ## Phase 8: GPIO Probe mode

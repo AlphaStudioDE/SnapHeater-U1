@@ -11,6 +11,7 @@
 #include "settings_store.h"
 #include "event_log.h"
 #include "heater.h"
+#include "board_panda_breath.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -35,19 +36,14 @@ static esp_err_t options_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-static cJSON *state_to_json(void) {
-    shu1_state_t st;
-    shu1_state_get(&st);
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "fw_name", SHU1_FW_NAME);
-    cJSON_AddStringToObject(root, "fw_version", SHU1_FW_VERSION);
-    cJSON_AddBoolToObject(root, "heater_output_build_enabled", CONFIG_SHU1_ENABLE_HEATER_OUTPUT);
-    cJSON_AddBoolToObject(root, "gpio_probe_build_enabled", CONFIG_SHU1_ENABLE_GPIO_PROBE);
-    cJSON_AddNumberToObject(root, "event_count", shu1_event_log_count());
-
-    cJSON *pins = cJSON_AddObjectToObject(root, "inferred_pins");
+static void add_pin_map(cJSON *root, const char *name, bool deprecated_alias) {
+    cJSON *pins = cJSON_AddObjectToObject(root, name);
+    cJSON_AddStringToObject(pins, "map_name", "panda_breath_accepted");
+    cJSON_AddStringToObject(pins, "safety_state", "heater_output_locked_by_default");
+    cJSON_AddBoolToObject(pins, "deprecated_alias", deprecated_alias);
     cJSON_AddNumberToObject(pins, "heater_gpio", CONFIG_SHU1_HEATER_GPIO);
     cJSON_AddNumberToObject(pins, "fan_gpio", CONFIG_SHU1_FAN_GPIO);
+    cJSON_AddNumberToObject(pins, "zero_cross_gpio", CONFIG_SHU1_ZERO_CROSS_GPIO);
     cJSON_AddNumberToObject(pins, "button_gpio", CONFIG_SHU1_BUTTON_GPIO);
     cJSON_AddNumberToObject(pins, "button_auto_gpio", CONFIG_SHU1_BUTTON_AUTO_GPIO);
     cJSON_AddNumberToObject(pins, "button_on_gpio", CONFIG_SHU1_BUTTON_ON_GPIO);
@@ -63,7 +59,26 @@ static cJSON *state_to_json(void) {
     cJSON_AddNumberToObject(pins, "ptc_adc_channel", CONFIG_SHU1_PTC_ADC_CH);
     cJSON_AddBoolToObject(pins, "heater_active_high", CONFIG_SHU1_HEATER_ACTIVE_HIGH);
     cJSON_AddBoolToObject(pins, "fan_active_high", CONFIG_SHU1_FAN_ACTIVE_HIGH);
-    cJSON_AddStringToObject(pins, "verification", "inferred_from_v1.0.1_to_v1.0.4_static_analysis__verify_on_pcb_before_live_use");
+    cJSON_AddStringToObject(pins, "heater_status", SHU1_BOARD_PIN_STATUS_HEATER);
+    cJSON_AddStringToObject(pins, "fan_status", SHU1_BOARD_PIN_STATUS_FAN);
+    cJSON_AddStringToObject(pins, "zero_cross_status", SHU1_BOARD_PIN_STATUS_ZERO_CROSS);
+    cJSON_AddStringToObject(pins, "sensor_status", "accepted_panda_breath_map");
+    cJSON_AddStringToObject(pins, "button_status", SHU1_BOARD_PIN_STATUS_BUTTONS);
+    cJSON_AddStringToObject(pins, "led_status", SHU1_BOARD_PIN_STATUS_LEDS);
+}
+
+static cJSON *state_to_json(void) {
+    shu1_state_t st;
+    shu1_state_get(&st);
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "fw_name", SHU1_FW_NAME);
+    cJSON_AddStringToObject(root, "fw_version", SHU1_FW_VERSION);
+    cJSON_AddBoolToObject(root, "heater_output_build_enabled", CONFIG_SHU1_ENABLE_HEATER_OUTPUT);
+    cJSON_AddBoolToObject(root, "gpio_probe_build_enabled", CONFIG_SHU1_ENABLE_GPIO_PROBE);
+    cJSON_AddNumberToObject(root, "event_count", shu1_event_log_count());
+
+    add_pin_map(root, "hardware_pins", false);
+    add_pin_map(root, "inferred_pins", true);
 
     cJSON *settings = cJSON_AddObjectToObject(root, "settings");
     cJSON_AddBoolToObject(settings, "work_on", st.settings.work_on);

@@ -13,9 +13,11 @@ The goal is not to copy the original user interface. The goal is to make the phy
 
 ## GPIO strategy
 
-The physical LED/backlight pins are **not known yet**, so the code already contains the complete logic, but all unknown GPIOs default to `-1` and are therefore disabled.
+The accepted Panda Breath map includes LED/backlight GPIOs, but button actions
+remain disabled by default until the K1/K2/K3 semantics are mapped safely to
+SnapHeater actions.
 
-Later, after PCB verification, only the GPIO values need to be filled in through `menuconfig` or `sdkconfig.defaults`:
+Current defaults:
 
 ```txt
 CONFIG_SHU1_BUTTON_AUTO_GPIO=-1
@@ -23,15 +25,16 @@ CONFIG_SHU1_BUTTON_ON_GPIO=-1
 CONFIG_SHU1_BUTTON_OFF_GPIO=-1
 CONFIG_SHU1_BUTTON_GENERIC_GPIO=-1
 
-CONFIG_SHU1_LED_AUTO_GPIO=-1
-CONFIG_SHU1_LED_ON_GPIO=-1
-CONFIG_SHU1_LED_OFF_GPIO=-1
+CONFIG_SHU1_LED_AUTO_GPIO=6
+CONFIG_SHU1_LED_ON_GPIO=5
+CONFIG_SHU1_LED_OFF_GPIO=4
 CONFIG_SHU1_LED_ERROR_GPIO=-1
 CONFIG_SHU1_LED_WIFI_GPIO=-1
 CONFIG_SHU1_LED_BLE_GPIO=-1
 ```
 
-This lets us prepare the firmware architecture now without guessing dangerous or unknown pins.
+GPIO7 is reserved for zero-cross detection and GPIO0/GPIO1 are sensor inputs.
+Do not reuse those shared nets as generic buttons.
 
 ## Button behavior
 
@@ -59,5 +62,5 @@ Physical ON/AUTO does **not bypass** the Output Safety Latch. If the safety latc
 
 - OFF long press forces outputs off directly through `shu1_heater_force_off()`.
 - ON/AUTO only change requested mode; the normal safety logic still decides whether heating is allowed.
-- Unknown LED GPIOs remain disabled until measured on the actual PCB.
+- Button GPIOs remain disabled until their behavior is implemented deliberately.
 - The physical panel is optional; Android/BLE and REST remain the primary configuration interfaces.

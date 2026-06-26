@@ -23,10 +23,10 @@ static const char *TAG = "SnapHeater_U1";
 
 void app_main(void) {
     ESP_LOGI(TAG, "%s %s booting", SHU1_FW_NAME, SHU1_FW_VERSION);
-    ESP_LOGW(TAG, "Development firmware. Verify Panda Breath PCB pins before enabling heater output.");
-    ESP_LOGW(TAG, "Inferred pins: heater GPIO%d, fan GPIO%d, chamber ADC%d, PTC ADC%d, button GPIO%d",
+    ESP_LOGW(TAG, "Public development firmware. Normal heater output is locked unless enabled at build time.");
+    ESP_LOGI(TAG, "Accepted Panda Breath pins: heater GPIO%d, fan GPIO%d, zero-cross GPIO%d, chamber ADC%d, PTC ADC%d",
              CONFIG_SHU1_HEATER_GPIO, CONFIG_SHU1_FAN_GPIO,
-             CONFIG_SHU1_CHAMBER_ADC_CH, CONFIG_SHU1_PTC_ADC_CH, CONFIG_SHU1_BUTTON_GPIO);
+             CONFIG_SHU1_ZERO_CROSS_GPIO, CONFIG_SHU1_CHAMBER_ADC_CH, CONFIG_SHU1_PTC_ADC_CH);
 
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

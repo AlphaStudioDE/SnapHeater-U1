@@ -10,7 +10,7 @@ The API intentionally uses simple JSON fields close to the user-facing semantics
 
 ## GET /api/status
 
-Returns firmware, inferred pin map, settings, runtime state and printer state.
+Returns firmware, accepted hardware pin map, settings, runtime state and printer state.
 
 Important fields:
 
@@ -20,15 +20,25 @@ Important fields:
   "fw_version": "0.2.0-dev",
   "heater_output_build_enabled": false,
   "gpio_probe_build_enabled": false,
-  "inferred_pins": {
+  "hardware_pins": {
+    "map_name": "panda_breath_accepted",
+    "safety_state": "heater_output_locked_by_default",
+    "deprecated_alias": false,
     "heater_gpio": 18,
     "fan_gpio": 3,
-    "button_gpio": 7,
+    "zero_cross_gpio": 7,
+    "button_gpio": -1,
+    "led_auto_gpio": 6,
+    "led_on_gpio": 5,
+    "led_off_gpio": 4,
     "chamber_adc_channel": 0,
     "ptc_adc_channel": 1,
     "heater_active_high": true,
     "fan_active_high": true,
-    "verification": "inferred_from_v1.0.1_to_v1.0.4_static_analysis__verify_on_pcb_before_live_use"
+    "heater_status": "accepted_panda_breath_map",
+    "fan_status": "accepted_panda_breath_map",
+    "zero_cross_status": "accepted_panda_breath_map",
+    "sensor_status": "accepted_panda_breath_map"
   },
   "settings": {
     "work_on": true,
@@ -62,6 +72,9 @@ Important fields:
   }
 }
 ```
+
+`inferred_pins` is still returned as a deprecated compatibility alias for older
+tools. New clients should use `hardware_pins`.
 
 ## POST /api/settings
 

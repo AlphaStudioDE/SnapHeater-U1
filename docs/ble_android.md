@@ -192,7 +192,7 @@ Diagnostics screen:
 - raw ADC PTC,
 - sensor status,
 - heater fault,
-- inferred GPIO map,
+- accepted hardware pin map,
 - heater build lock state,
 - firmware version.
 

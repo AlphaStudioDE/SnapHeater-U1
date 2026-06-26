@@ -141,8 +141,8 @@ Use a BLE scanner or test client:
 
 With heater output still disabled:
 
-- Treat GPIO0 as the chamber/warehouse NTC ADC candidate.
-- Treat GPIO1 as the PTC element NTC ADC candidate.
+- GPIO0 is the chamber/warehouse NTC ADC input.
+- GPIO1 is the PTC element NTC ADC input.
 - Read chamber sensor at room temperature.
 - Read PTC sensor at room temperature.
 - Warm each sensor gently by hand or controlled warm air.
@@ -154,12 +154,12 @@ Do not continue to output testing if ADC conversion is wrong.
 
 ## 9. Buttons And LEDs
 
-- Treat GPIO7 as a zero-cross detector candidate first, not as a simple button.
-- Do not enable K1 button behavior until GPIO7 pulse-width handling is understood.
+- Treat GPIO7 as a zero-cross detector first, not as a simple button.
+- Do not enable K1 button behavior until GPIO7 pulse-width handling is implemented.
 - Treat GPIO0 as shared with the K2 button net and avoid configuring it as a
   button while it is needed for chamber ADC validation.
-- Treat GPIO2 as the K3 button candidate.
-- Treat GPIO6, GPIO5 and GPIO4 as K1/K2/K3 LED candidates.
+- GPIO2 is the K3 button net.
+- GPIO6, GPIO5 and GPIO4 are K1/K2/K3 LED nets.
 - Test each known physical button.
 - Confirm short press and long press behavior.
 - Confirm OFF or emergency safe-off input is detected.
@@ -175,7 +175,7 @@ Only after board inspection:
 - Enable GPIO probe only for a supervised fan test.
 - Keep normal heater output disabled.
 - Pulse fan first.
-- Treat GPIO3 as the fan TRIAC gate candidate.
+- GPIO3 is the fan TRIAC gate.
 - Confirm GPIO7 zero-cross behavior before relying on phase-angle fan control.
 - Confirm fan GPIO and active polarity.
 - Confirm fan can run without heater.
@@ -201,7 +201,7 @@ Disable GPIO probe again after the test.
 Do not pulse the heater until all of these are true:
 
 - Heater connector and MOSFET path are identified.
-- GPIO18 is confirmed as the PTC relay driver candidate on the actual PCB.
+- GPIO18 is the PTC relay driver.
 - Heater GPIO is confirmed.
 - Active polarity is confirmed.
 - Fan behavior is confirmed.

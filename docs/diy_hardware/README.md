@@ -51,7 +51,7 @@ The firmware expects these logical functions:
 | Physical controls | `CONFIG_SHU1_BUTTON_*_GPIO` | Optional but OFF/safe-stop is strongly recommended |
 | Indicator LEDs | `CONFIG_SHU1_LED_*_GPIO` | Optional |
 
-The default firmware target still uses Panda Breath-inferred GPIOs. DIY builders must set GPIOs to match their own wiring and then follow the unlock procedure.
+The default firmware target uses the accepted Panda Breath GPIO map. DIY builders must set GPIOs to match their own wiring and then follow the unlock procedure.
 
 ## Minimum DIY Build
 

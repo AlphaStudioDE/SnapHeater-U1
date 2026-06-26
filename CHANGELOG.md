@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.3-dev - Accepted Panda Breath firmware baseline
+
+- Promoted the Panda Breath GPIO map from candidate wording to the accepted public firmware baseline.
+- Added `CONFIG_SHU1_ZERO_CROSS_GPIO=7` and exposed zero-cross GPIO in REST/BLE diagnostics.
+- Added the accepted K1/K2/K3 LED GPIO defaults while keeping physical button actions disabled by default.
+- Replaced REST `hardware_pins` as the primary pin map field and kept `inferred_pins` as a deprecated compatibility alias.
+- Kept normal heater output and GPIO probe disabled by default for public builds.
+
 ## v1.9.2-dev - ESP-IDF build readiness
 
 - Refined Panda Breath GPIO verification candidates and kept shared GPIO7 disabled by default.

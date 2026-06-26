@@ -9,8 +9,8 @@
 
 SnapHeater U1 is a from-scratch firmware architecture for turning a chamber-heater accessory into a printer-aware chamber climate companion for **Snapmaker U1**. It combines Moonraker-based printer awareness, BLE control, physical buttons, safety layers, thermal intelligence, post-print conditioning and presentation-ready documentation.
 
-> Current status: **advanced firmware skeleton / architecture base**.
-> The project builds for ESP32-C3 with ESP-IDF v5.3.5 and is prepared for later bring-up, GPIO validation and mobile application development.
+> Current status: **advanced firmware skeleton with accepted Panda Breath pin map**.
+> The project builds for ESP32-C3 with ESP-IDF v5.3.5. Normal heater output remains locked by default for safe public builds.
 > DIY reference hardware notes are available for builders who want to assemble a compatible low-voltage DC controller instead of using Panda Breath-style hardware.
 
 ---
@@ -138,7 +138,7 @@ The goal is chamber climate cooperation, not full printer control.
 The firmware skeleton includes a staged safety model:
 
 - heater output disabled by default,
-- board pin mapping isolated in `main/board_panda_breath.h`,
+- accepted Panda Breath board pin mapping isolated in `main/board_panda_breath.h`,
 - output safety latch,
 - sensor fault handling,
 - PTC overtemperature protection,
@@ -147,7 +147,7 @@ The firmware skeleton includes a staged safety model:
 - first setup validation,
 - GPIO probe and staged hardware bring-up.
 
-> Physical heater output should remain locked until the PCB pin mapping, output polarity, fan behavior and sensor readings are confirmed on real hardware.
+> Physical heater output should remain locked until fan behavior, sensor readings, output polarity and the safety latch are confirmed on real hardware.
 
 ## Hardware responsibility and liability
 

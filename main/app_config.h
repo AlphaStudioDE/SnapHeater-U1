@@ -9,9 +9,9 @@
 #include "sdkconfig.h"
 
 #define SHU1_FW_NAME        "SnapHeater U1"
-#define SHU1_FW_VERSION     "1.7.0-dev"
+#define SHU1_FW_VERSION     "1.9.3-dev"
 #define SHU1_DEFAULT_MATERIAL_MISMATCH_WARNING_ENABLED 1
-#define SHU1_PROJECT_URL    "https://github.com/YOUR_USER/SnapHeater_U1"
+#define SHU1_PROJECT_URL    "https://github.com/AlphaStudioDE/SnapHeater-U1"
 
 #define SHU1_API_PORT       80
 
@@ -29,6 +29,9 @@
 #endif
 #ifndef CONFIG_SHU1_FAN_ACTIVE_HIGH
 #define CONFIG_SHU1_FAN_ACTIVE_HIGH 0
+#endif
+#ifndef CONFIG_SHU1_ZERO_CROSS_GPIO
+#define CONFIG_SHU1_ZERO_CROSS_GPIO -1
 #endif
 #ifndef CONFIG_SHU1_ENABLE_BLE
 #define CONFIG_SHU1_ENABLE_BLE 0
