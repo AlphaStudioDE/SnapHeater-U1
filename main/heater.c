@@ -6,6 +6,7 @@
 
 #include "heater.h"
 #include "app_state.h"
+#include "fan_triac.h"
 #include "esp_log.h"
 #include "esp_check.h"
 #include "driver/gpio.h"
@@ -40,8 +41,8 @@ static esp_err_t configure_output(int gpio) {
 
 esp_err_t shu1_heater_init(void) {
     ESP_RETURN_ON_ERROR(configure_output(CONFIG_SHU1_HEATER_GPIO), TAG, "heater gpio config failed");
-    ESP_RETURN_ON_ERROR(configure_output(CONFIG_SHU1_FAN_GPIO), TAG, "fan gpio config failed");
     ESP_RETURN_ON_ERROR(configure_output(CONFIG_SHU1_STATUS_LED_GPIO), TAG, "status led gpio config failed");
+    ESP_RETURN_ON_ERROR(shu1_fan_triac_init(), TAG, "fan triac init failed");
     shu1_heater_force_off();
     ESP_LOGW(TAG, "normal heater output is %s", CONFIG_SHU1_ENABLE_HEATER_OUTPUT ? "ENABLED" : "DISABLED / DRY-RUN");
     ESP_LOGW(TAG, "diagnostic GPIO probe API is %s", CONFIG_SHU1_ENABLE_GPIO_PROBE ? "ENABLED" : "DISABLED");
@@ -55,7 +56,7 @@ void shu1_heater_set(bool heater_on, bool fan_on) {
     (void)heater_on;
     write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
 #endif
-    write_gpio_if_valid(CONFIG_SHU1_FAN_GPIO, fan_on, CONFIG_SHU1_FAN_ACTIVE_HIGH);
+    shu1_fan_triac_set(fan_on);
     write_gpio_if_valid(CONFIG_SHU1_STATUS_LED_GPIO, heater_on || fan_on, true);
 
     shu1_runtime_t rt = shu1_state_get_runtime();
@@ -70,7 +71,7 @@ void shu1_heater_set(bool heater_on, bool fan_on) {
 
 void shu1_heater_force_off(void) {
     write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
-    write_gpio_if_valid(CONFIG_SHU1_FAN_GPIO, false, CONFIG_SHU1_FAN_ACTIVE_HIGH);
+    shu1_fan_triac_force_off();
     write_gpio_if_valid(CONFIG_SHU1_STATUS_LED_GPIO, false, true);
 
     shu1_runtime_t rt = shu1_state_get_runtime();
@@ -91,13 +92,13 @@ esp_err_t shu1_heater_probe_pulse(shu1_output_t output, int duration_ms) {
         if (duration_ms > CONFIG_SHU1_MAX_HEATER_PROBE_MS) duration_ms = CONFIG_SHU1_MAX_HEATER_PROBE_MS;
         ESP_LOGW(TAG, "HEATER PROBE PULSE: GPIO%d for %d ms", CONFIG_SHU1_HEATER_GPIO, duration_ms);
         // Keep fan on during heater pulse if fan GPIO is available.
-        write_gpio_if_valid(CONFIG_SHU1_FAN_GPIO, true, CONFIG_SHU1_FAN_ACTIVE_HIGH);
+        shu1_fan_triac_set(true);
         vTaskDelay(pdMS_TO_TICKS(100));
         write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, true, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
         vTaskDelay(pdMS_TO_TICKS(duration_ms));
         write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
         vTaskDelay(pdMS_TO_TICKS(500));
-        write_gpio_if_valid(CONFIG_SHU1_FAN_GPIO, false, CONFIG_SHU1_FAN_ACTIVE_HIGH);
+        shu1_fan_triac_set(false);
         return ESP_OK;
     }
     if (output == SHU1_OUTPUT_FAN) {
@@ -105,9 +106,9 @@ esp_err_t shu1_heater_probe_pulse(shu1_output_t output, int duration_ms) {
         if (duration_ms < 100) duration_ms = 100;
         if (duration_ms > CONFIG_SHU1_MAX_FAN_PROBE_MS) duration_ms = CONFIG_SHU1_MAX_FAN_PROBE_MS;
         ESP_LOGW(TAG, "FAN PROBE PULSE: GPIO%d for %d ms", CONFIG_SHU1_FAN_GPIO, duration_ms);
-        write_gpio_if_valid(CONFIG_SHU1_FAN_GPIO, true, CONFIG_SHU1_FAN_ACTIVE_HIGH);
+        shu1_fan_triac_set(true);
         vTaskDelay(pdMS_TO_TICKS(duration_ms));
-        write_gpio_if_valid(CONFIG_SHU1_FAN_GPIO, false, CONFIG_SHU1_FAN_ACTIVE_HIGH);
+        shu1_fan_triac_set(false);
         return ESP_OK;
     }
     return ESP_ERR_INVALID_ARG;

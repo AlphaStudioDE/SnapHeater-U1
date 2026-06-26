@@ -11,10 +11,9 @@ For the staged criteria to unlock probe and heater output features, see
 ## Safety principles
 
 1. Do not enable normal heater output during the first build.
-2. Use the accepted Panda Breath GPIO map, but keep live heater output locked
-   until bench tests pass.
-3. Keep `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n` until fan, heater, sensors and
-   output polarity are confirmed.
+2. Use the accepted Panda Breath GPIO map and keep runtime safety checks active.
+3. Keep the Output Safety Latch enabled until fan, heater, sensors and output
+   polarity are confirmed through normal diagnostics.
 4. Use GPIO Probe mode only for short, supervised tests.
 5. If any sensor value is invalid, heater output must remain OFF.
 
@@ -36,7 +35,7 @@ phase. Do not add new features until the project builds.
 Recommended first configuration:
 
 ```txt
-CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n
+CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y
 CONFIG_SHU1_ENABLE_GPIO_PROBE=n
 CONFIG_SHU1_ENABLE_BLE=y
 CONFIG_SHU1_ENABLE_PHYSICAL_CONTROLS=y
@@ -97,7 +96,7 @@ Expected:
 
 - JSON responses,
 - no reboot loops,
-- heater status reports locked/disabled,
+- heater status reports controlled by runtime safety/latch state,
 - ADC fields are present even if not calibrated yet.
 
 ## Phase 4: BLE smoke test
@@ -164,7 +163,7 @@ Only after board inspection:
 
 ```txt
 CONFIG_SHU1_ENABLE_GPIO_PROBE=y
-CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n
+CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y
 ```
 
 Order:

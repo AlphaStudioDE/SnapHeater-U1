@@ -95,7 +95,7 @@ config SHU1_HEATER_GPIO
     default 18
     help
         Accepted Panda Breath PTC relay / heater output GPIO.
-        Normal heater output is still locked by CONFIG_SHU1_ENABLE_HEATER_OUTPUT.
+        Normal heater output is guarded by runtime safety checks and latch state.
 
 config SHU1_FAN_GPIO
     int "Fan/filter output GPIO"
@@ -224,10 +224,11 @@ menu "Output safety locks"
 
 config SHU1_ENABLE_HEATER_OUTPUT
     bool "Enable normal physical heater output"
-    default n
+    default y
     help
-        Keep disabled until PCB pins, active polarity, sensors and fuse path are verified.
-        With this off, normal temperature automation never energizes the heater GPIO.
+        Enables normal physical heater output for the accepted Panda Breath map.
+        Runtime safety checks, sensor validity and the Output Safety Latch still
+        decide whether automation may energize the heater GPIO.
 
 config SHU1_HEATER_ACTIVE_HIGH
     bool "Heater output is active high"
@@ -240,6 +241,51 @@ config SHU1_FAN_ACTIVE_HIGH
     default y
     help
         Accepted Panda Breath polarity: HIGH = ON.
+
+config SHU1_ENABLE_FAN_TRIAC_CONTROL
+    bool "Use Panda Breath TRIAC phase-angle fan control"
+    default y
+    help
+        Drives the fan through GPIO3 TRIAC gate pulses synchronized to the
+        GPIO7 zero-cross detector. Disable only for DIY hardware that uses a
+        plain DC fan driver on CONFIG_SHU1_FAN_GPIO.
+
+config SHU1_AC_MAINS_HZ
+    int "AC mains frequency for TRIAC fan control"
+    default 50
+    range 45 65
+    help
+        Used to calculate half-cycle timing for phase-angle fan control.
+
+config SHU1_ZERO_CROSS_RISING_EDGE
+    bool "Zero-cross detector triggers on rising edge"
+    default y
+    help
+        Panda Breath GPIO7 zero-cross input is treated as a rising-edge pulse
+        source by default.
+
+config SHU1_FAN_TRIAC_RUN_PERCENT
+    int "Default TRIAC fan run power percent"
+    default 100
+    range 30 100
+    help
+        Current firmware requests fan as ON/OFF, so this is the power used
+        whenever the safety loop requests fan ON. Tune after live airflow tests.
+
+config SHU1_FAN_TRIAC_MIN_DELAY_US
+    int "Minimum TRIAC gate delay after zero-cross, us"
+    default 200
+    range 50 2000
+    help
+        Even at 100 percent fan request, wait this long after zero-cross before
+        firing the TRIAC gate pulse.
+
+config SHU1_FAN_TRIAC_GATE_PULSE_US
+    int "TRIAC gate pulse width, us"
+    default 100
+    range 50 1000
+    help
+        Width of the GPIO3 gate pulse sent after each zero-cross delay.
 
 config SHU1_ENABLE_GPIO_PROBE
     bool "Enable diagnostic GPIO pulse API"

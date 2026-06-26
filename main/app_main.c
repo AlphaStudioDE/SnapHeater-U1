@@ -23,7 +23,7 @@ static const char *TAG = "SnapHeater_U1";
 
 void app_main(void) {
     ESP_LOGI(TAG, "%s %s booting", SHU1_FW_NAME, SHU1_FW_VERSION);
-    ESP_LOGW(TAG, "Public development firmware. Normal heater output is locked unless enabled at build time.");
+    ESP_LOGW(TAG, "Public development firmware. Heater output is build-enabled but guarded by runtime safety checks.");
     ESP_LOGI(TAG, "Accepted Panda Breath pins: heater GPIO%d, fan GPIO%d, zero-cross GPIO%d, chamber ADC%d, PTC ADC%d",
              CONFIG_SHU1_HEATER_GPIO, CONFIG_SHU1_FAN_GPIO,
              CONFIG_SHU1_ZERO_CROSS_GPIO, CONFIG_SHU1_CHAMBER_ADC_CH, CONFIG_SHU1_PTC_ADC_CH);

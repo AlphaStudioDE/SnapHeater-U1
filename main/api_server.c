@@ -39,7 +39,7 @@ static esp_err_t options_handler(httpd_req_t *req) {
 static void add_pin_map(cJSON *root, const char *name, bool deprecated_alias) {
     cJSON *pins = cJSON_AddObjectToObject(root, name);
     cJSON_AddStringToObject(pins, "map_name", "panda_breath_accepted");
-    cJSON_AddStringToObject(pins, "safety_state", "heater_output_locked_by_default");
+    cJSON_AddStringToObject(pins, "safety_state", "heater_output_build_enabled_runtime_latch_required");
     cJSON_AddBoolToObject(pins, "deprecated_alias", deprecated_alias);
     cJSON_AddNumberToObject(pins, "heater_gpio", CONFIG_SHU1_HEATER_GPIO);
     cJSON_AddNumberToObject(pins, "fan_gpio", CONFIG_SHU1_FAN_GPIO);
@@ -59,6 +59,11 @@ static void add_pin_map(cJSON *root, const char *name, bool deprecated_alias) {
     cJSON_AddNumberToObject(pins, "ptc_adc_channel", CONFIG_SHU1_PTC_ADC_CH);
     cJSON_AddBoolToObject(pins, "heater_active_high", CONFIG_SHU1_HEATER_ACTIVE_HIGH);
     cJSON_AddBoolToObject(pins, "fan_active_high", CONFIG_SHU1_FAN_ACTIVE_HIGH);
+    cJSON_AddBoolToObject(pins, "fan_triac_control", CONFIG_SHU1_ENABLE_FAN_TRIAC_CONTROL);
+    cJSON_AddNumberToObject(pins, "ac_mains_hz", CONFIG_SHU1_AC_MAINS_HZ);
+    cJSON_AddNumberToObject(pins, "fan_triac_run_percent", CONFIG_SHU1_FAN_TRIAC_RUN_PERCENT);
+    cJSON_AddNumberToObject(pins, "fan_triac_min_delay_us", CONFIG_SHU1_FAN_TRIAC_MIN_DELAY_US);
+    cJSON_AddNumberToObject(pins, "fan_triac_gate_pulse_us", CONFIG_SHU1_FAN_TRIAC_GATE_PULSE_US);
     cJSON_AddStringToObject(pins, "heater_status", SHU1_BOARD_PIN_STATUS_HEATER);
     cJSON_AddStringToObject(pins, "fan_status", SHU1_BOARD_PIN_STATUS_FAN);
     cJSON_AddStringToObject(pins, "zero_cross_status", SHU1_BOARD_PIN_STATUS_ZERO_CROSS);

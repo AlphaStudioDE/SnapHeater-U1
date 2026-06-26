@@ -5,6 +5,7 @@ idf_component_register(
         "wifi_sta.c"
         "ntc.c"
         "heater.c"
+        "fan_triac.c"
         "safety.c"
         "api_server.c"
         "moonraker_client.c"

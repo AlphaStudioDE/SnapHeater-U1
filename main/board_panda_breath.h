@@ -15,7 +15,8 @@
  * touching feature code.
  *
  * Safety policy:
- * - Normal heater output remains compile-time locked by default.
+ * - Normal heater output is build-enabled for the accepted Panda Breath map.
+ * - Runtime safety checks and the Output Safety Latch still guard heating.
  * - GPIO7 is the zero-cross detector net and must not be configured as a
  *   generic button.
  * - GPIO0/GPIO1 are ADC sensor inputs and should not be reused as buttons.

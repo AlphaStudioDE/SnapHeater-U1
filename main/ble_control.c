@@ -175,7 +175,7 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
 
     snprintf(buf, len,
              "{\"fw\":\"%s\",\"ble_unlocked\":%s,\"heater_build\":%s,\"probe_build\":%s,"
-             "\"pins\":{\"heater\":%d,\"fan\":%d,\"zero_cross\":%d,\"button\":%d,\"adc_chamber\":%d,\"adc_ptc\":%d},"
+             "\"pins\":{\"heater\":%d,\"fan\":%d,\"zero_cross\":%d,\"fan_triac\":%s,\"fan_pct\":%d,\"button\":%d,\"adc_chamber\":%d,\"adc_ptc\":%d},"
              "\"settings\":{\"work_on\":%s,\"mode\":%d,\"profile\":%d,\"profile_name\":\"%s\",\"set_temp\":%d,\"filtertemp\":%d,\"hotbedtemp\":%d,\"ptc_cutoff\":%d,"
              "\"preheat_running\":%s,\"preheat_target\":%d,\"preheat_hold_min\":%d,\"preheat_phase\":%d,\"preheat_remaining_seconds\":%lld,\"preheat_complete_pending\":%s,"
              "\"manual_session_max_min\":%d,\"session_timeout_pending\":%s,"
@@ -194,7 +194,8 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
              g_ble_unlocked ? "true" : "false",
              CONFIG_SHU1_ENABLE_HEATER_OUTPUT ? "true" : "false",
              CONFIG_SHU1_ENABLE_GPIO_PROBE ? "true" : "false",
-             CONFIG_SHU1_HEATER_GPIO, CONFIG_SHU1_FAN_GPIO, CONFIG_SHU1_ZERO_CROSS_GPIO, CONFIG_SHU1_BUTTON_GPIO,
+             CONFIG_SHU1_HEATER_GPIO, CONFIG_SHU1_FAN_GPIO, CONFIG_SHU1_ZERO_CROSS_GPIO,
+             CONFIG_SHU1_ENABLE_FAN_TRIAC_CONTROL ? "true" : "false", CONFIG_SHU1_FAN_TRIAC_RUN_PERCENT, CONFIG_SHU1_BUTTON_GPIO,
              CONFIG_SHU1_CHAMBER_ADC_CH, CONFIG_SHU1_PTC_ADC_CH,
              st.settings.work_on ? "true" : "false", st.settings.work_mode, st.settings.material_profile, shu1_profile_name(st.settings.material_profile), st.settings.target_temp_c,
              st.settings.filter_trigger_bed_c, st.settings.heater_trigger_bed_c, st.settings.ptc_cutoff_c,

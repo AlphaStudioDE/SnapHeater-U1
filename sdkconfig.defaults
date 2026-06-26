@@ -15,7 +15,8 @@ CONFIG_SHU1_WIFI_PASSWORD="YOUR_PASSWORD"
 CONFIG_SHU1_MOONRAKER_HOST="192.168.1.100"
 CONFIG_SHU1_MOONRAKER_PORT=7125
 
-# Accepted Panda Breath pin map. Normal heater output remains locked by default.
+# Accepted Panda Breath pin map. Normal heater output is build-enabled and
+# remains guarded by runtime safety checks and the Output Safety Latch.
 CONFIG_SHU1_HEATER_GPIO=18
 CONFIG_SHU1_FAN_GPIO=3
 CONFIG_SHU1_ZERO_CROSS_GPIO=7
@@ -25,12 +26,19 @@ CONFIG_SHU1_CHAMBER_ADC_CH=0
 CONFIG_SHU1_PTC_ADC_CH=1
 CONFIG_SHU1_HEATER_ACTIVE_HIGH=y
 CONFIG_SHU1_FAN_ACTIVE_HIGH=y
+CONFIG_SHU1_ENABLE_FAN_TRIAC_CONTROL=y
+CONFIG_SHU1_AC_MAINS_HZ=50
+CONFIG_SHU1_ZERO_CROSS_RISING_EDGE=y
+CONFIG_SHU1_FAN_TRIAC_RUN_PERCENT=100
+CONFIG_SHU1_FAN_TRIAC_MIN_DELAY_US=200
+CONFIG_SHU1_FAN_TRIAC_GATE_PULSE_US=100
 CONFIG_SHU1_LED_AUTO_GPIO=6
 CONFIG_SHU1_LED_ON_GPIO=5
 CONFIG_SHU1_LED_OFF_GPIO=4
 
-# Hard safety defaults: normal heater output and probe API disabled.
-CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n
+# Hard safety defaults: normal heater output is available behind runtime safety;
+# diagnostic probe API remains disabled unless explicitly enabled for bench tests.
+CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y
 CONFIG_SHU1_ENABLE_GPIO_PROBE=n
 CONFIG_SHU1_MAX_HEATER_PROBE_MS=300
 CONFIG_SHU1_MAX_FAN_PROBE_MS=3000

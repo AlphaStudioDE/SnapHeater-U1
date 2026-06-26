@@ -4,9 +4,9 @@ SnapHeater U1 treats chamber heating as a hazardous function.
 
 ## Firmware safety layers
 
-1. Normal heater output disabled by default at build time.
+1. Normal heater output build-enabled for the accepted Panda Breath map.
 2. Diagnostic probe API disabled by default at build time.
-3. Panda Breath GPIO defaults are accepted, while live output remains locked until bench validation.
+3. Runtime safety checks and the Output Safety Latch guard physical heating.
 4. Sensor fault stops heater request.
 5. Chamber overtemperature stops heater request.
 6. PTC local overtemperature stops heater request.
@@ -59,7 +59,7 @@ Firmware must not be the only safety layer. Use:
 
 ## First power-up recommendation
 
-1. Flash only with `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n`.
+1. Flash with `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y` only for the accepted Panda Breath map.
 2. Read `/api/status` and confirm ADC values move with temperature.
 3. Open device and confirm output behavior with safe bench measurements.
 4. Optionally compile a separate probe build with `CONFIG_SHU1_ENABLE_GPIO_PROBE=y`.

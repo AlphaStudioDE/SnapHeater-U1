@@ -9,8 +9,8 @@
 
 SnapHeater U1 is a from-scratch firmware architecture for turning a chamber-heater accessory into a printer-aware chamber climate companion for **Snapmaker U1**. It combines Moonraker-based printer awareness, BLE control, physical buttons, safety layers, thermal intelligence, post-print conditioning and presentation-ready documentation.
 
-> Current status: **advanced firmware skeleton with accepted Panda Breath pin map**.
-> The project builds for ESP32-C3 with ESP-IDF v5.3.5. Normal heater output remains locked by default for safe public builds.
+> Current status: **advanced firmware baseline with accepted Panda Breath pin map**.
+> The project builds for ESP32-C3 with ESP-IDF v5.3.5. Normal heater output is build-enabled and guarded by runtime safety checks.
 > DIY reference hardware notes are available for builders who want to assemble a compatible low-voltage DC controller instead of using Panda Breath-style hardware.
 
 ---
@@ -137,7 +137,7 @@ The goal is chamber climate cooperation, not full printer control.
 
 The firmware skeleton includes a staged safety model:
 
-- heater output disabled by default,
+- heater output guarded by runtime safety checks and Output Safety Latch,
 - accepted Panda Breath board pin mapping isolated in `main/board_panda_breath.h`,
 - output safety latch,
 - sensor fault handling,
@@ -147,7 +147,7 @@ The firmware skeleton includes a staged safety model:
 - first setup validation,
 - GPIO probe and staged hardware bring-up.
 
-> Physical heater output should remain locked until fan behavior, sensor readings, output polarity and the safety latch are confirmed on real hardware.
+> Physical heater output is available in the default Panda Breath build, but runtime safety checks must pass before heating is allowed.
 
 ## Hardware responsibility and liability
 
@@ -201,6 +201,7 @@ Useful starting points:
 - [apps/android/SnapHeaterU1](apps/android/SnapHeaterU1) — Android companion app UI prototype
 - [docs/diy_hardware/README.md](docs/diy_hardware/README.md) — DIY reference hardware BOM and wiring notes
 - [docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md) — first physical hardware bring-up checklist
+- [docs/panda_breath_fan_triac.md](docs/panda_breath_fan_triac.md) — Panda Breath GPIO7/GPIO3 TRIAC fan control
 - [docs/SAFETY_UNLOCK_PROCEDURE.md](docs/SAFETY_UNLOCK_PROCEDURE.md) — staged criteria for unlocking probe and heater output features
 - [docs/SYSTEM_DIAGRAMS.md](docs/SYSTEM_DIAGRAMS.md) — Mermaid diagrams
 - [main/board_panda_breath.h](main/board_panda_breath.h) — central board pin configuration
@@ -228,7 +229,7 @@ Current build baseline:
 - target: `esp32c3`
 - ESP-IDF: `v5.3.5`
 - flash layout: Panda Breath-style `4MB` dual-OTA partition table
-- default safety: `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n`
+- default safety: `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y` with Output Safety Latch and sensor/fault checks
 
 The first hardware flash should be performed with physical heater output disabled.
 
@@ -279,7 +280,7 @@ The project is intended as the original upstream SnapHeater U1 firmware framewor
 
 This repository currently contains a **feature-rich firmware skeleton**. It is intended as the base for:
 
-1. safe firmware flashing with heater output locked,
+1. safe firmware flashing with runtime heater safety active,
 2. GPIO and sensor validation,
 3. Moonraker/Snapmaker U1 integration tests,
 4. BLE/mobile integration,

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.4-dev - TRIAC fan control baseline
+
+- Added Panda Breath TRIAC fan control using GPIO7 zero-cross detection and GPIO3 gate pulses.
+- Added Kconfig tuning for AC mains frequency, gate pulse width, phase delay and fan run percent.
+- Routed normal fan requests and fan probe pulses through the TRIAC/zero-cross driver.
+- Build-enabled normal heater output for the accepted Panda Breath map while keeping runtime safety checks and the Output Safety Latch.
+- Exposed TRIAC fan parameters in REST and BLE diagnostics.
+
 ## v1.9.3-dev - Accepted Panda Breath firmware baseline
 
 - Promoted the Panda Breath GPIO map from candidate wording to the accepted public firmware baseline.
