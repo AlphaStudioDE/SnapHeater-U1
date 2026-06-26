@@ -88,25 +88,28 @@ config SHU1_DEFAULT_TEMPERING_DURATION_MIN
 
 endmenu
 
-menu "Inferred Panda Breath hardware pins - verify before live use"
+menu "Candidate Panda Breath hardware pins - verify before live use"
 
 config SHU1_HEATER_GPIO
     int "Heater/PTC output GPIO"
     default 18
     help
-        Inferred from multi-version static analysis. Must be verified on real PCB.
+        PTC relay / heater output candidate. Must be verified on real PCB.
 
 config SHU1_FAN_GPIO
     int "Fan/filter output GPIO"
     default 3
     help
-        Inferred from multi-version static analysis. Must be verified on real PCB.
+        Fan TRIAC gate candidate. Must be verified on real PCB.
 
 config SHU1_BUTTON_GPIO
-    int "Physical button GPIO (-1 disables)"
-    default 7
+    int "Legacy generic physical button GPIO (-1 disables)"
+    default -1
     help
-        Inferred from static analysis. Verify on PCB.
+        Legacy status/API field only. Keep disabled by default. GPIO7 is a
+        zero-cross detector candidate shared with K1 button behavior and must
+        not be configured as a simple button until pulse-width handling is
+        validated on the real PCB.
 
 config SHU1_STATUS_LED_GPIO
     int "Status LED GPIO (-1 disables)"
@@ -116,13 +119,13 @@ config SHU1_CHAMBER_ADC_CH
     int "ADC1 channel for chamber/warehouse NTC"
     default 0
     help
-        ADC1_CH0 is GPIO0 on ESP32-C3. Inferred from WAREHOUSE_ADC_CHAN.
+        ADC1_CH0 is GPIO0 on ESP32-C3. Candidate chamber/warehouse NTC input.
 
 config SHU1_PTC_ADC_CH
     int "ADC1 channel for PTC NTC"
     default 1
     help
-        ADC1_CH1 is GPIO1 on ESP32-C3. Inferred from PTC_ADC_CHAN.
+        ADC1_CH1 is GPIO1 on ESP32-C3. Candidate PTC element NTC input.
 
 endmenu
 

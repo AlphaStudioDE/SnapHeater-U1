@@ -45,7 +45,23 @@ CONFIG_SHU1_CHAMBER_ADC_CH=0
 CONFIG_SHU1_PTC_ADC_CH=1
 ```
 
-Unknown LEDs/buttons should remain `-1` until verified.
+Detailed buttons and LEDs should remain `-1` until verified. Current hardware
+candidates for later PCB checks are:
+
+```txt
+GPIO18 = PTC relay / heater output candidate
+GPIO3  = fan TRIAC gate candidate
+GPIO7  = zero-cross detector candidate, shared with K1 button behavior
+GPIO0  = chamber/warehouse NTC ADC candidate, also shared with K2 button net
+GPIO1  = PTC element NTC ADC candidate
+GPIO2  = K3 button candidate
+GPIO6  = K1 LED candidate
+GPIO5  = K2 LED candidate
+GPIO4  = K3 LED candidate
+```
+
+Do not enable any shared button/LED behavior until the sensor and zero-cross
+roles are understood on the real PCB.
 
 ## Phase 2: Flash without heater output
 
@@ -133,6 +149,10 @@ Before GPIO Probe:
 - identify fan connector,
 - identify sensor connectors,
 - identify MOSFET/driver path,
+- verify GPIO18 continuity to the PTC relay driver path,
+- verify GPIO3 continuity to the fan TRIAC gate driver path,
+- verify GPIO7 zero-cross input behavior,
+- verify GPIO0/GPIO1 sensor nets before using them for any other role,
 - check whether output drivers are active-high or active-low,
 - verify whether the fan can run before/with heater.
 

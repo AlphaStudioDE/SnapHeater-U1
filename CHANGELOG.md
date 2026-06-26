@@ -2,6 +2,7 @@
 
 ## v1.9.2-dev - ESP-IDF build readiness
 
+- Refined Panda Breath GPIO verification candidates and kept shared GPIO7 disabled by default.
 - Persisted Android mode settings in app state and added an explicit confirmation action.
 - Expanded the Android app shell to cover the current firmware feature surface and added a firmware-to-app map.
 - Added mode-specific Android settings panels after selecting a workflow.
