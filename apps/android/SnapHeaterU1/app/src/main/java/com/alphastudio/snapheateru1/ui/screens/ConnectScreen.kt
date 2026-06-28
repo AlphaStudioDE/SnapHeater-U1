@@ -29,6 +29,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,6 +46,11 @@ import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
 @Composable
 fun ConnectScreen(
+    deviceAddress: String,
+    connectionStatus: String,
+    isConnecting: Boolean,
+    onDeviceAddress: (String) -> Unit,
+    onConnect: () -> Unit,
     onDemoMode: () -> Unit,
 ) {
     var scanState by remember { mutableStateOf("Ready") }
@@ -85,8 +91,25 @@ fun ConnectScreen(
                     )
                     Column {
                         Text("Device connection", fontWeight = FontWeight.Bold)
-                        Text(scanState, color = if (scanState == "Ready") StatusColors.Normal else StatusColors.Warning)
+                        Text(connectionStatus, color = if (connectionStatus == "Ready") StatusColors.Normal else StatusColors.Warning)
                     }
+                }
+
+                OutlinedTextField(
+                    value = deviceAddress,
+                    onValueChange = onDeviceAddress,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Device address") },
+                    placeholder = { Text("192.168.1.80") },
+                )
+
+                Button(
+                    onClick = onConnect,
+                    enabled = !isConnecting && deviceAddress.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (isConnecting) "Connecting" else "Connect over LAN")
                 }
 
                 Button(
@@ -105,6 +128,10 @@ fun ConnectScreen(
                     Icon(Icons.Filled.PlayArrow, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
                     Text("Demo mode")
+                }
+
+                if (scanState != "Ready") {
+                    Text(scanState, color = StatusColors.Warning, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

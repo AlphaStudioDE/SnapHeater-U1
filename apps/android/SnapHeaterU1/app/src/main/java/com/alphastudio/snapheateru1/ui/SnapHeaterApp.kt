@@ -21,8 +21,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,6 +33,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
+import com.alphastudio.snapheateru1.data.FirmwareSnapHeaterRepository
+import com.alphastudio.snapheateru1.data.SnapHeaterApiClient
+import com.alphastudio.snapheateru1.data.normalizeBaseUrl
 import com.alphastudio.snapheateru1.model.AppMode
 import com.alphastudio.snapheateru1.model.AppSession
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
@@ -40,22 +46,79 @@ import com.alphastudio.snapheateru1.ui.screens.ModesScreen
 import com.alphastudio.snapheateru1.ui.screens.SafetyScreen
 import com.alphastudio.snapheateru1.ui.screens.SettingsScreen
 import com.alphastudio.snapheateru1.ui.theme.SnapHeaterTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SnapHeaterApp() {
     var appSessionName by rememberSaveable { mutableStateOf(AppSession.Connect.name) }
     var selectedTabName by rememberSaveable { mutableStateOf(AppTab.Dashboard.name) }
+    var deviceAddress by rememberSaveable { mutableStateOf("") }
+    var connectedBaseUrl by rememberSaveable { mutableStateOf("") }
+    var connectionStatus by rememberSaveable { mutableStateOf("Ready") }
+    var isConnecting by rememberSaveable { mutableStateOf(false) }
     var snapshot by rememberSaveable(stateSaver = HeaterSnapshotSaver) {
         mutableStateOf(HeaterSnapshot(ble = "Demo mode"))
     }
     val appSession = AppSession.valueOf(appSessionName)
     val selectedTab = AppTab.valueOf(selectedTabName)
+    val scope = rememberCoroutineScope()
+    val firmwareRepository = remember(connectedBaseUrl) {
+        if (connectedBaseUrl.isBlank()) null else FirmwareSnapHeaterRepository(SnapHeaterApiClient(connectedBaseUrl))
+    }
+
+    LaunchedEffect(appSessionName, connectedBaseUrl) {
+        val repository = firmwareRepository ?: return@LaunchedEffect
+        if (appSession != AppSession.Demo) return@LaunchedEffect
+        while (true) {
+            runCatching {
+                withContext(Dispatchers.IO) { repository.snapshot() }
+            }.onSuccess { latest ->
+                snapshot = latest.copy(lastConfirmedSettings = snapshot.lastConfirmedSettings)
+                connectionStatus = "Connected to $connectedBaseUrl"
+            }.onFailure { error ->
+                connectionStatus = "Connection lost: ${error.shortMessage()}"
+                snapshot = snapshot.copy(ble = "LAN error")
+            }
+            delay(3000)
+        }
+    }
 
     if (appSession == AppSession.Connect) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             ConnectScreen(
+                deviceAddress = deviceAddress,
+                connectionStatus = connectionStatus,
+                isConnecting = isConnecting,
+                onDeviceAddress = {
+                    deviceAddress = it
+                    connectionStatus = "Ready"
+                },
+                onConnect = {
+                    val baseUrl = normalizeBaseUrl(deviceAddress)
+                    isConnecting = true
+                    connectionStatus = "Connecting"
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                FirmwareSnapHeaterRepository(SnapHeaterApiClient(baseUrl)).checkHealth()
+                            }
+                        }.onSuccess { latest ->
+                            connectedBaseUrl = baseUrl
+                            snapshot = latest
+                            connectionStatus = "Connected to $baseUrl"
+                            appSessionName = AppSession.Demo.name
+                        }.onFailure { error ->
+                            connectionStatus = "Connection failed: ${error.shortMessage()}"
+                        }
+                        isConnecting = false
+                    }
+                },
                 onDemoMode = {
+                    connectedBaseUrl = ""
                     appSessionName = AppSession.Demo.name
                     snapshot = snapshot.copy(ble = "Demo mode")
                 },
@@ -80,6 +143,23 @@ fun SnapHeaterApp() {
                     )
                 },
                 onSnapshotChange = { updated -> snapshot = updated },
+                onConfirmSettings = { confirmed ->
+                    snapshot = confirmed
+                    val repository = firmwareRepository
+                    if (repository != null) {
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) { repository.applySettings(confirmed) }
+                            }.onSuccess { latest ->
+                                snapshot = latest.copy(lastConfirmedSettings = confirmed.lastConfirmedSettings)
+                                connectionStatus = "Settings confirmed"
+                            }.onFailure { error ->
+                                connectionStatus = "Settings failed: ${error.shortMessage()}"
+                                snapshot = confirmed.copy(lastConfirmedSettings = "Pending ${confirmed.mode.label} settings")
+                            }
+                        }
+                    }
+                },
             )
             AppTab.Safety -> SafetyScreen(snapshot)
             AppTab.Diagnostics -> DiagnosticsScreen(snapshot)
@@ -91,6 +171,8 @@ fun SnapHeaterApp() {
         }
     }
 }
+
+private fun Throwable.shortMessage(): String = message?.take(80) ?: this::class.java.simpleName
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

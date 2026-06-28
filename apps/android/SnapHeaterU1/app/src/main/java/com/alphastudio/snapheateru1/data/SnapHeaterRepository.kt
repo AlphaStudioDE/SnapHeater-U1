@@ -13,4 +13,5 @@ interface SnapHeaterRepository {
     fun snapshot(): HeaterSnapshot
     fun setMode(mode: AppMode): HeaterSnapshot
     fun setTarget(targetC: Int): HeaterSnapshot
+    fun applySettings(snapshot: HeaterSnapshot): HeaterSnapshot
 }

@@ -23,4 +23,9 @@ class MockSnapHeaterRepository : SnapHeaterRepository {
         state = state.copy(targetC = targetC)
         return state
     }
+
+    override fun applySettings(snapshot: HeaterSnapshot): HeaterSnapshot {
+        state = snapshot
+        return state
+    }
 }

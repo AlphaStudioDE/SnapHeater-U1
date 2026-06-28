@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
@@ -6,6 +7,7 @@
     <application
         android:allowBackup="true"
         android:label="SnapHeater U1"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.SnapHeaterU1">
         <activity
             android:name=".MainActivity"

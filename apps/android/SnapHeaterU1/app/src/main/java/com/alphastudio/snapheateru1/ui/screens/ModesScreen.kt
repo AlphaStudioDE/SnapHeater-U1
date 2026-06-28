@@ -36,6 +36,7 @@ fun ModesScreen(
     snapshot: HeaterSnapshot,
     onMode: (AppMode) -> Unit,
     onSnapshotChange: (HeaterSnapshot) -> Unit,
+    onConfirmSettings: (HeaterSnapshot) -> Unit,
 ) {
     ScreenColumn {
         SectionTitle("Modes", "Choose a workflow. Unsafe outputs stay blocked in mock and locked firmware states.")
@@ -58,6 +59,7 @@ fun ModesScreen(
                         ModeSettingsPanel(
                             snapshot = snapshot,
                             onSnapshotChange = onSnapshotChange,
+                            onConfirmSettings = onConfirmSettings,
                         )
                         Button(onClick = { onMode(AppMode.SafeStop) }, modifier = Modifier.fillMaxWidth()) {
                             Text("Safe stop")
@@ -77,6 +79,7 @@ fun ModesScreen(
 private fun ModeSettingsPanel(
     snapshot: HeaterSnapshot,
     onSnapshotChange: (HeaterSnapshot) -> Unit,
+    onConfirmSettings: (HeaterSnapshot) -> Unit,
 ) {
     Column(
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -142,7 +145,7 @@ private fun ModeSettingsPanel(
 
         Button(
             onClick = {
-                onSnapshotChange(
+                onConfirmSettings(
                     snapshot.copy(lastConfirmedSettings = confirmedSummary(snapshot)),
                 )
             },
