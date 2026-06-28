@@ -28,4 +28,21 @@ class MockSnapHeaterRepository : SnapHeaterRepository {
         state = snapshot
         return state
     }
+
+    override fun applySafety(snapshot: HeaterSnapshot, armLatch: Boolean, disarmLatch: Boolean): HeaterSnapshot {
+        state = snapshot.copy(
+            outputSafetyLatchArmed = when {
+                armLatch -> true
+                disarmLatch -> false
+                else -> snapshot.outputSafetyLatchArmed
+            },
+            outputSafetyLatchReady = armLatch || (
+                snapshot.outputSafetyLatchArmed &&
+                    snapshot.heaterOutputVerified &&
+                    snapshot.fanOutputVerified &&
+                    snapshot.sensorsVerified
+                ),
+        )
+        return state
+    }
 }

@@ -173,7 +173,40 @@ fun SnapHeaterApp() {
                     }
                 },
             )
-            AppTab.Safety -> SafetyScreen(snapshot)
+            AppTab.Safety -> SafetyScreen(
+                snapshot = snapshot,
+                onApplySafety = { updated, armLatch, disarmLatch ->
+                    snapshot = updated.copy(lastConfirmedSettings = "Applying safety state")
+                    val repository = firmwareRepository
+                    if (repository != null) {
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) { repository.applySafety(updated, armLatch, disarmLatch) }
+                            }.onSuccess { latest ->
+                                snapshot = latest.copy(lastConfirmedSettings = "Safety state applied")
+                                connectionStatus = "Safety state applied"
+                            }.onFailure { error ->
+                                connectionStatus = "Safety update failed: ${error.shortMessage()}"
+                                snapshot = updated.copy(lastConfirmedSettings = "Safety state pending")
+                            }
+                        }
+                    } else {
+                        val armed = when {
+                            armLatch -> true
+                            disarmLatch -> false
+                            else -> updated.outputSafetyLatchArmed
+                        }
+                        snapshot = updated.copy(
+                            outputSafetyLatchArmed = armed,
+                            outputSafetyLatchReady = armed &&
+                                updated.heaterOutputVerified &&
+                                updated.fanOutputVerified &&
+                                updated.sensorsVerified,
+                            lastConfirmedSettings = "Safety state applied in demo",
+                        )
+                    }
+                },
+            )
             AppTab.Diagnostics -> DiagnosticsScreen(snapshot)
             AppTab.Settings -> SettingsScreen(
                 snapshot = snapshot,
@@ -325,6 +358,11 @@ private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
             snapshot.fanTriacRunPercent,
             snapshot.fanTriacMinDelayUs,
             snapshot.fanTriacGatePulseUs,
+            snapshot.outputSafetyLatchReady,
+            snapshot.heaterOutputVerified,
+            snapshot.fanOutputVerified,
+            snapshot.sensorsVerified,
+            snapshot.moonrakerVerified,
         )
     },
     restore = { values ->
@@ -385,6 +423,11 @@ private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
             fanTriacRunPercent = values.getOrNull(52) as? Int ?: 100,
             fanTriacMinDelayUs = values.getOrNull(53) as? Int ?: 200,
             fanTriacGatePulseUs = values.getOrNull(54) as? Int ?: 100,
+            outputSafetyLatchReady = values.getOrNull(55) as? Boolean ?: false,
+            heaterOutputVerified = values.getOrNull(56) as? Boolean ?: false,
+            fanOutputVerified = values.getOrNull(57) as? Boolean ?: false,
+            sensorsVerified = values.getOrNull(58) as? Boolean ?: false,
+            moonrakerVerified = values.getOrNull(59) as? Boolean ?: false,
         )
     },
 )

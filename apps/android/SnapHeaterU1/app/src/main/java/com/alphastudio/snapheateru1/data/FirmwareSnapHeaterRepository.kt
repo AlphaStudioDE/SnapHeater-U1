@@ -31,6 +31,18 @@ class FirmwareSnapHeaterRepository(
         return client.postSettings(snapshot.toSettingsPayload()).toHeaterSnapshot()
     }
 
+    override fun applySafety(snapshot: HeaterSnapshot, armLatch: Boolean, disarmLatch: Boolean): HeaterSnapshot {
+        val payload = JSONObject()
+            .put("output_safety_latch_enabled", true)
+            .put("heater_output_verified", snapshot.heaterOutputVerified)
+            .put("fan_output_verified", snapshot.fanOutputVerified)
+            .put("sensors_verified", snapshot.sensorsVerified)
+            .put("moonraker_verified", snapshot.moonrakerVerified)
+        if (armLatch) payload.put("arm_output_safety_latch", true)
+        if (disarmLatch) payload.put("disarm_output_safety_latch", true)
+        return client.postSettings(payload).toHeaterSnapshot()
+    }
+
     fun checkHealth(): HeaterSnapshot {
         client.health()
         return snapshot()
@@ -124,6 +136,11 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         safetyScore = runtime.optInt("safety_score", settings.optInt("safety_score", 0)),
         setupValidationPassed = runtime.optBoolean("setup_validation_passed", settings.optBoolean("setup_validation_passed", false)),
         outputSafetyLatchArmed = settings.optBoolean("output_safety_latch_armed", false),
+        outputSafetyLatchReady = runtime.optBoolean("output_safety_latch_ready", false),
+        heaterOutputVerified = settings.optBoolean("heater_output_verified", false),
+        fanOutputVerified = settings.optBoolean("fan_output_verified", false),
+        sensorsVerified = settings.optBoolean("sensors_verified", false),
+        moonrakerVerified = settings.optBoolean("moonraker_verified", false),
         heaterOutputBuildEnabled = optBoolean("heater_output_build_enabled", false),
         heaterLocked = !optBoolean("heater_output_build_enabled", false),
         gpioProbeLocked = !optBoolean("gpio_probe_build_enabled", false),
