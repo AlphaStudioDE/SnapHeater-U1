@@ -56,11 +56,13 @@ fun DashboardScreen(snapshot: HeaterSnapshot) {
                 StatusRow("Moonraker", snapshot.moonraker, valueColor = StatusColors.Warning)
                 StatusRow("Fan", if (snapshot.fanOn) "On" else "Off", valueColor = if (snapshot.fanOn) StatusColors.Good else StatusColors.Normal)
                 StatusRow(
-                    "Heater output",
-                    if (snapshot.heaterLocked) "Locked" else "Available",
+                    "Heater build",
+                    if (snapshot.heaterOutputBuildEnabled) "Enabled" else "Disabled",
                     strong = true,
-                    valueColor = if (snapshot.heaterLocked) StatusColors.Good else StatusColors.Warning,
+                    valueColor = if (snapshot.heaterOutputBuildEnabled) StatusColors.Warning else StatusColors.Good,
                 )
+                StatusRow("Output latch", if (snapshot.outputSafetyLatchArmed) "Armed" else "Not armed", valueColor = if (snapshot.outputSafetyLatchArmed) StatusColors.Warning else StatusColors.Good)
+                StatusRow("Fan driver", if (snapshot.fanTriacControl) "TRIAC / ZC" else "GPIO", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
                 LinearProgressIndicator(
                     progress = { snapshot.safetyScore / 100f },
                     modifier = Modifier.fillMaxWidth(),
@@ -109,14 +111,14 @@ fun DashboardScreen(snapshot: HeaterSnapshot) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusPill(snapshot.ble, StatusColors.Normal)
             StatusPill(
-                if (snapshot.gpioProbeLocked) "GPIO probe locked" else "GPIO probe passed",
-                if (snapshot.gpioProbeLocked) StatusColors.Warning else StatusColors.Good,
+                "${snapshot.hardwareMapName}: H${snapshot.heaterGpio} F${snapshot.fanGpio} ZC${snapshot.zeroCrossGpio}",
+                StatusColors.Good,
             )
             StatusPill("Local control only", StatusColors.Normal)
         }
 
         Text(
-            "The app cannot unlock heating by itself. Firmware safety gates and hardware validation remain authoritative.",
+            "Heating is build-enabled in firmware, while runtime safety gates and the Output Safety Latch remain authoritative.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.Medium,

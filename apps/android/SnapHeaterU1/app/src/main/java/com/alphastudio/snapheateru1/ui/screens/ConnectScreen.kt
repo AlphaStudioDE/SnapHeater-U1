@@ -124,9 +124,9 @@ fun ConnectScreen(
                     tint = StatusColors.Good,
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Safety locked", fontWeight = FontWeight.Bold)
+                    Text("Runtime safety active", fontWeight = FontWeight.Bold)
                     Text(
-                        "Heating stays blocked until firmware and hardware validation allow it.",
+                        "Firmware uses the accepted Panda Breath pin map. Heating is governed by sensor, fault and latch state.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

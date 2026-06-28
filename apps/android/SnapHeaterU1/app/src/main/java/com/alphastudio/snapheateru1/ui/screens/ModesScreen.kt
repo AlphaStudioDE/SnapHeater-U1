@@ -200,5 +200,5 @@ private fun confirmedSummary(snapshot: HeaterSnapshot): String = when (snapshot.
     AppMode.Preheat -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C / soak ${snapshot.preheatHeatSoakMin} min"
     AppMode.Drying -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C / ${snapshot.dryingTimeMin} min"
     AppMode.Tempering -> "${snapshot.mode.label} confirmed / ${snapshot.temperingDurationMin} min / target ${snapshot.targetC} C"
-    AppMode.SafeStop -> "${snapshot.mode.label} confirmed / heater locked"
+    AppMode.SafeStop -> "${snapshot.mode.label} confirmed / outputs stopped"
 }

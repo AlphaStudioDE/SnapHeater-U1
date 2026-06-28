@@ -43,8 +43,43 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 StatusRow("BLE state", snapshot.ble)
                 StatusRow("Service", SnapHeaterBleContract.ServiceUuid.toString().take(13) + "...")
                 StatusRow("Firmware", snapshot.firmwareVersion)
-                StatusRow("Firmware channel", "Mock")
+                StatusRow("Heater build", if (snapshot.heaterOutputBuildEnabled) "Enabled" else "Disabled", valueColor = if (snapshot.heaterOutputBuildEnabled) StatusColors.Warning else StatusColors.Good)
                 StatusRow("Moonraker", snapshot.moonraker, valueColor = StatusColors.Warning)
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+            ) {
+                Text("Panda Breath hardware", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                StatusRow("Map", snapshot.hardwareMapName, valueColor = StatusColors.Good)
+                StatusRow("Heater relay", "GPIO${snapshot.heaterGpio}", valueColor = StatusColors.Warning)
+                StatusRow("Fan TRIAC gate", "GPIO${snapshot.fanGpio}", valueColor = StatusColors.Good)
+                StatusRow("Zero-cross", "GPIO${snapshot.zeroCrossGpio}", valueColor = StatusColors.Good)
+                StatusRow("Chamber / PTC ADC", "CH${snapshot.chamberAdcChannel} / CH${snapshot.ptcAdcChannel}")
+                StatusRow("K1/K2/K3 LEDs", "GPIO${snapshot.ledAutoGpio} / GPIO${snapshot.ledOnGpio} / GPIO${snapshot.ledOffGpio}")
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(14.dp),
+            ) {
+                Text("Fan TRIAC timing", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                StatusRow("Driver", if (snapshot.fanTriacControl) "Phase-angle / zero-cross" else "Plain GPIO", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Mains", "${snapshot.acMainsHz} Hz")
+                StatusRow("Run power", "${snapshot.fanTriacRunPercent}%")
+                StatusRow("Min delay", "${snapshot.fanTriacMinDelayUs} us")
+                StatusRow("Gate pulse", "${snapshot.fanTriacGatePulseUs} us")
             }
         }
 
@@ -58,8 +93,9 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
             ) {
                 Text("Event log", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 LogLine("00:01", "App started in mock repository mode")
-                LogLine("00:03", "Safety state loaded: heater locked")
-                LogLine("00:08", "Moonraker bridge unavailable in prototype")
+                LogLine("00:03", "Hardware map loaded: ${snapshot.hardwareMapName}")
+                LogLine("00:05", "TRIAC fan: GPIO${snapshot.fanGpio} gate, GPIO${snapshot.zeroCrossGpio} zero-cross")
+                LogLine("00:08", "Heater build enabled: ${snapshot.heaterOutputBuildEnabled}")
                 LogLine("00:11", "Temperature history enabled: ${snapshot.tempHistoryEnabled}")
                 LogLine("00:13", "Incident reports enabled: ${snapshot.incidentReportEnabled}")
             }

@@ -29,12 +29,12 @@ import com.alphastudio.snapheateru1.ui.theme.StatusColors
 @Composable
 fun SafetyScreen(snapshot: HeaterSnapshot) {
     ScreenColumn {
-        SectionTitle("Safety unlock", "Checklist mirror for the firmware-side staged validation process")
+        SectionTitle("Runtime safety", "Firmware build follows the accepted Panda Breath pin map")
 
-        SafetyStep("Firmware built with heater output disabled", true)
-        SafetyStep("GPIO probe confirms expected pins", !snapshot.gpioProbeLocked)
-        SafetyStep("Independent thermal cutoff installed", snapshot.setupValidationPassed)
-        SafetyStep("Fan fail test completed", snapshot.setupValidationPassed)
+        SafetyStep("Firmware built with accepted Panda Breath GPIO", snapshot.hardwareMapName == "panda_breath_accepted")
+        SafetyStep("Heater output build-enabled", snapshot.heaterOutputBuildEnabled)
+        SafetyStep("TRIAC fan driver uses zero-cross input", snapshot.fanTriacControl && snapshot.zeroCrossGpio == 7)
+        SafetyStep("Runtime safety latch required", true)
         SafetyStep("Moonraker command scope reviewed", snapshot.moonraker.contains("read", ignoreCase = true))
 
         Card(
@@ -47,16 +47,17 @@ fun SafetyScreen(snapshot: HeaterSnapshot) {
             ) {
                 Text("Current gate", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 StatusRow(
-                    "Heater output",
-                    if (snapshot.heaterLocked) "Locked" else "Available",
+                    "Heater build",
+                    if (snapshot.heaterOutputBuildEnabled) "Enabled" else "Disabled",
                     strong = true,
-                    valueColor = if (snapshot.heaterLocked) StatusColors.Good else StatusColors.Warning,
+                    valueColor = if (snapshot.heaterOutputBuildEnabled) StatusColors.Warning else StatusColors.Good,
                 )
+                StatusRow("Hardware map", snapshot.hardwareMapName, valueColor = StatusColors.Good)
                 StatusRow("Readiness", "${snapshot.safetyScore}%", valueColor = safetyColor(snapshot.safetyScore))
                 StatusRow("Setup validation", if (snapshot.setupValidationPassed) "Passed" else "Pending", valueColor = if (snapshot.setupValidationPassed) StatusColors.Good else StatusColors.Warning)
                 StatusRow("Output latch", if (snapshot.outputSafetyLatchArmed) "Armed" else "Not armed", valueColor = if (snapshot.outputSafetyLatchArmed) StatusColors.Warning else StatusColors.Good)
                 Text(
-                    "This screen documents readiness only. Unlocking remains a firmware configuration and hardware validation decision.",
+                    "This screen mirrors firmware readiness. Build output is enabled, but normal heating still depends on runtime sensor, fault and latch state.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -73,11 +74,11 @@ fun SafetyScreen(snapshot: HeaterSnapshot) {
             ) {
                 Text("Output Safety Latch workflow", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 StatusRow("Sensors verified", if (snapshot.setupValidationPassed) "Yes" else "No", valueColor = if (snapshot.setupValidationPassed) StatusColors.Good else StatusColors.Warning)
-                StatusRow("Fan verified", if (snapshot.setupValidationPassed) "Yes" else "No", valueColor = if (snapshot.setupValidationPassed) StatusColors.Good else StatusColors.Warning)
-                StatusRow("Heater verified", if (snapshot.heaterLocked) "Locked" else "User enabled", valueColor = if (snapshot.heaterLocked) StatusColors.Good else StatusColors.Warning)
-                StatusRow("GPIO probe", if (snapshot.gpioProbeLocked) "Build locked" else "Probe build", valueColor = if (snapshot.gpioProbeLocked) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Fan driver", if (snapshot.fanTriacControl) "GPIO${snapshot.fanGpio} + ZC GPIO${snapshot.zeroCrossGpio}" else "Plain GPIO${snapshot.fanGpio}", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
+                StatusRow("Heater output", "GPIO${snapshot.heaterGpio}", valueColor = StatusColors.Warning)
+                StatusRow("GPIO probe API", if (snapshot.gpioProbeLocked) "Disabled" else "Enabled", valueColor = if (snapshot.gpioProbeLocked) StatusColors.Good else StatusColors.Warning)
                 Text(
-                    "The app should require explicit user acknowledgement before any future BLE/REST arm_output_safety_latch write.",
+                    "Any future BLE/REST arm_output_safety_latch write should still require explicit user acknowledgement in the app.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
