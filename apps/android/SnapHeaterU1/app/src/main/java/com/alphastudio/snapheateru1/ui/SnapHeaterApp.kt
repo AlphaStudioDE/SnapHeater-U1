@@ -10,8 +10,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -30,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
@@ -130,7 +134,15 @@ fun SnapHeaterApp() {
     SnapHeaterScaffold(
         selectedTab = selectedTab,
         snapshot = snapshot,
+        connectionStatus = connectionStatus,
         onTab = { selectedTabName = it.name },
+        onReconnect = {
+            appSessionName = AppSession.Connect.name
+            selectedTabName = AppTab.Dashboard.name
+            connectedBaseUrl = ""
+            connectionStatus = "Ready"
+            snapshot = snapshot.copy(ble = "Disconnected")
+        },
     ) { tab ->
         when (tab) {
             AppTab.Dashboard -> DashboardScreen(snapshot)
@@ -167,6 +179,25 @@ fun SnapHeaterApp() {
                 snapshot = snapshot,
                 onTarget = { target -> snapshot = snapshot.copy(targetC = target) },
                 onSnapshotChange = { updated -> snapshot = updated },
+                onApplySettings = { updated ->
+                    snapshot = updated.copy(lastConfirmedSettings = "Applying settings")
+                    val repository = firmwareRepository
+                    if (repository != null) {
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) { repository.applySettings(updated) }
+                            }.onSuccess { latest ->
+                                snapshot = latest.copy(lastConfirmedSettings = "Settings applied")
+                                connectionStatus = "Settings applied"
+                            }.onFailure { error ->
+                                connectionStatus = "Settings failed: ${error.shortMessage()}"
+                                snapshot = updated.copy(lastConfirmedSettings = "Settings pending")
+                            }
+                        }
+                    } else {
+                        snapshot = updated.copy(lastConfirmedSettings = "Settings applied in demo")
+                    }
+                },
             )
         }
     }
@@ -179,7 +210,9 @@ private fun Throwable.shortMessage(): String = message?.take(80) ?: this::class.
 private fun SnapHeaterScaffold(
     selectedTab: AppTab,
     snapshot: HeaterSnapshot,
+    connectionStatus: String,
     onTab: (AppTab) -> Unit,
+    onReconnect: () -> Unit,
     content: @Composable (AppTab) -> Unit,
 ) {
     Scaffold(
@@ -189,10 +222,17 @@ private fun SnapHeaterScaffold(
                     Column {
                         Text("SnapHeater U1", fontWeight = FontWeight.Bold)
                         Text(
-                            "${snapshot.ble} / ${snapshot.mode.label}",
+                            "${snapshot.ble} / ${snapshot.mode.label} / $connectionStatus",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onReconnect) {
+                        Icon(Icons.Filled.Close, contentDescription = "Change device")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
