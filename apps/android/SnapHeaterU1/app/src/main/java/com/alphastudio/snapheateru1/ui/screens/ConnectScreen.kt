@@ -38,9 +38,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.ui.components.StatusPill
 import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
@@ -53,7 +55,9 @@ fun ConnectScreen(
     onConnect: () -> Unit,
     onDemoMode: () -> Unit,
 ) {
-    var scanState by remember { mutableStateOf("Ready") }
+    val ready = stringResource(R.string.status_ready)
+    val noDevice = stringResource(R.string.connect_no_device)
+    var scanState by remember { mutableStateOf(ready) }
 
     Column(
         modifier = Modifier
@@ -63,12 +67,12 @@ fun ConnectScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(modifier = Modifier.height(8.dp))
-        StatusPill("Local only", StatusColors.Normal)
+        StatusPill(stringResource(R.string.status_local_only), StatusColors.Normal)
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("SnapHeater U1", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.app_name), fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Chamber heater companion",
+                stringResource(R.string.connect_subtitle),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -90,8 +94,8 @@ fun ConnectScreen(
                         tint = MaterialTheme.colorScheme.primary,
                     )
                     Column {
-                        Text("Device connection", fontWeight = FontWeight.Bold)
-                        Text(connectionStatus, color = if (connectionStatus == "Ready") StatusColors.Normal else StatusColors.Warning)
+                        Text(stringResource(R.string.connect_device_connection), fontWeight = FontWeight.Bold)
+                        Text(connectionStatus, color = if (connectionStatus == ready) StatusColors.Normal else StatusColors.Warning)
                     }
                 }
 
@@ -100,7 +104,7 @@ fun ConnectScreen(
                     onValueChange = onDeviceAddress,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("Device address") },
+                    label = { Text(stringResource(R.string.connect_device_address)) },
                     placeholder = { Text("192.168.1.80") },
                 )
 
@@ -109,16 +113,16 @@ fun ConnectScreen(
                     enabled = !isConnecting && deviceAddress.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (isConnecting) "Connecting" else "Connect over LAN")
+                    Text(if (isConnecting) stringResource(R.string.status_connecting) else stringResource(R.string.connect_over_lan))
                 }
 
                 Button(
-                    onClick = { scanState = "No validated device found" },
+                    onClick = { scanState = noDevice },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Filled.Bluetooth, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("Search for SnapHeater")
+                    Text(stringResource(R.string.connect_search))
                 }
 
                 FilledTonalButton(
@@ -127,10 +131,10 @@ fun ConnectScreen(
                 ) {
                     Icon(Icons.Filled.PlayArrow, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("Demo mode")
+                    Text(stringResource(R.string.status_demo_mode))
                 }
 
-                if (scanState != "Ready") {
+                if (scanState != ready) {
                     Text(scanState, color = StatusColors.Warning, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -151,9 +155,9 @@ fun ConnectScreen(
                     tint = StatusColors.Good,
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("Runtime safety active", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.connect_runtime_safety_title), fontWeight = FontWeight.Bold)
                     Text(
-                        "Firmware uses the accepted Panda Breath pin map. Heating is governed by sensor, fault and latch state.",
+                        stringResource(R.string.connect_runtime_safety_body),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -165,7 +169,7 @@ fun ConnectScreen(
             onClick = onDemoMode,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Continue without device")
+            Text(stringResource(R.string.connect_continue_without_device))
         }
     }
 }

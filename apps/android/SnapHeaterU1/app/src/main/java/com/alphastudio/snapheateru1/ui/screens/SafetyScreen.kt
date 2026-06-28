@@ -21,8 +21,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.components.SectionTitle
@@ -36,15 +38,19 @@ fun SafetyScreen(
 ) {
     val verificationReady = snapshot.heaterOutputVerified && snapshot.fanOutputVerified && snapshot.sensorsVerified
     val latchPrerequisitesReady = verificationReady && (!snapshot.moonrakerVerified || snapshot.setupValidationPassed)
+    val confirmSensors = stringResource(R.string.safety_confirm_sensors)
+    val confirmFan = stringResource(R.string.safety_confirm_fan)
+    val confirmHeater = stringResource(R.string.safety_confirm_heater)
+    val confirmMoonraker = stringResource(R.string.safety_confirm_moonraker)
 
     ScreenColumn {
-        SectionTitle("Runtime safety", "Firmware build follows the accepted Panda Breath pin map")
+        SectionTitle(stringResource(R.string.safety_title), stringResource(R.string.safety_subtitle))
 
-        SafetyStep("Firmware built with accepted Panda Breath GPIO", snapshot.hardwareMapName == "panda_breath_accepted")
-        SafetyStep("Heater output build-enabled", snapshot.heaterOutputBuildEnabled)
-        SafetyStep("TRIAC fan driver uses zero-cross input", snapshot.fanTriacControl && snapshot.zeroCrossGpio == 7)
-        SafetyStep("Runtime safety latch ready", snapshot.outputSafetyLatchReady)
-        SafetyStep("Moonraker command scope reviewed", snapshot.moonrakerVerified)
+        SafetyStep(stringResource(R.string.safety_step_gpio), snapshot.hardwareMapName == "panda_breath_accepted")
+        SafetyStep(stringResource(R.string.safety_step_heater_build), snapshot.heaterOutputBuildEnabled)
+        SafetyStep(stringResource(R.string.safety_step_triac), snapshot.fanTriacControl && snapshot.zeroCrossGpio == 7)
+        SafetyStep(stringResource(R.string.safety_step_latch_ready), snapshot.outputSafetyLatchReady)
+        SafetyStep(stringResource(R.string.safety_step_moonraker), snapshot.moonrakerVerified)
 
         Card(
             shape = RoundedCornerShape(8.dp),
@@ -54,20 +60,20 @@ fun SafetyScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                Text("Current gate", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.safety_current_gate), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 StatusRow(
-                    "Heater build",
-                    if (snapshot.heaterOutputBuildEnabled) "Enabled" else "Disabled",
+                    stringResource(R.string.label_heater),
+                    if (snapshot.heaterOutputBuildEnabled) stringResource(R.string.value_enabled) else stringResource(R.string.value_disabled),
                     strong = true,
                     valueColor = if (snapshot.heaterOutputBuildEnabled) StatusColors.Warning else StatusColors.Good,
                 )
-                StatusRow("Hardware map", snapshot.hardwareMapName, valueColor = StatusColors.Good)
-                StatusRow("Readiness", "${snapshot.safetyScore}%", valueColor = safetyColor(snapshot.safetyScore))
-                StatusRow("Setup validation", if (snapshot.setupValidationPassed) "Passed" else "Pending", valueColor = if (snapshot.setupValidationPassed) StatusColors.Good else StatusColors.Warning)
-                StatusRow("Output latch", if (snapshot.outputSafetyLatchArmed) "Armed" else "Not armed", valueColor = if (snapshot.outputSafetyLatchArmed) StatusColors.Warning else StatusColors.Good)
-                StatusRow("Latch ready", if (snapshot.outputSafetyLatchReady) "Ready" else "Blocked", valueColor = if (snapshot.outputSafetyLatchReady) StatusColors.Good else StatusColors.Warning)
+                StatusRow(stringResource(R.string.safety_hardware_map), snapshot.hardwareMapName, valueColor = StatusColors.Good)
+                StatusRow(stringResource(R.string.safety_readiness), "${snapshot.safetyScore}%", valueColor = safetyColor(snapshot.safetyScore))
+                StatusRow(stringResource(R.string.safety_setup_validation), if (snapshot.setupValidationPassed) stringResource(R.string.common_ready) else stringResource(R.string.common_pending), valueColor = if (snapshot.setupValidationPassed) StatusColors.Good else StatusColors.Warning)
+                StatusRow(stringResource(R.string.dashboard_output_latch), if (snapshot.outputSafetyLatchArmed) stringResource(R.string.common_armed) else stringResource(R.string.common_not_armed), valueColor = if (snapshot.outputSafetyLatchArmed) StatusColors.Warning else StatusColors.Good)
+                StatusRow(stringResource(R.string.safety_latch_ready_label), if (snapshot.outputSafetyLatchReady) stringResource(R.string.common_ready) else stringResource(R.string.common_blocked), valueColor = if (snapshot.outputSafetyLatchReady) StatusColors.Good else StatusColors.Warning)
                 Text(
-                    "This screen mirrors firmware readiness. Build output is enabled, but normal heating still depends on runtime sensor, fault and latch state.",
+                    stringResource(R.string.safety_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -82,31 +88,31 @@ fun SafetyScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                Text("Output Safety Latch workflow", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                StatusRow("Sensors verified", yesNo(snapshot.sensorsVerified), valueColor = verifyColor(snapshot.sensorsVerified))
-                StatusRow("Fan driver", if (snapshot.fanTriacControl) "GPIO${snapshot.fanGpio} + ZC GPIO${snapshot.zeroCrossGpio}" else "Plain GPIO${snapshot.fanGpio}", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
-                StatusRow("Fan output verified", yesNo(snapshot.fanOutputVerified), valueColor = verifyColor(snapshot.fanOutputVerified))
-                StatusRow("Heater output", "GPIO${snapshot.heaterGpio}", valueColor = if (snapshot.heaterOutputVerified) StatusColors.Good else StatusColors.Warning)
-                StatusRow("Heater output verified", yesNo(snapshot.heaterOutputVerified), valueColor = verifyColor(snapshot.heaterOutputVerified))
-                StatusRow("Moonraker verified", yesNo(snapshot.moonrakerVerified), valueColor = verifyColor(snapshot.moonrakerVerified))
-                StatusRow("Arm prerequisites", if (latchPrerequisitesReady) "Ready" else "Incomplete", valueColor = if (latchPrerequisitesReady) StatusColors.Good else StatusColors.Warning)
-                StatusRow("GPIO probe API", if (snapshot.gpioProbeLocked) "Disabled" else "Enabled", valueColor = if (snapshot.gpioProbeLocked) StatusColors.Good else StatusColors.Warning)
+                Text(stringResource(R.string.safety_latch_workflow), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                StatusRow(stringResource(R.string.safety_sensors_verified), yesNo(snapshot.sensorsVerified), valueColor = verifyColor(snapshot.sensorsVerified))
+                StatusRow(stringResource(R.string.safety_fan_driver), if (snapshot.fanTriacControl) "GPIO${snapshot.fanGpio} + ZC GPIO${snapshot.zeroCrossGpio}" else "Plain GPIO${snapshot.fanGpio}", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
+                StatusRow(stringResource(R.string.safety_fan_output_verified), yesNo(snapshot.fanOutputVerified), valueColor = verifyColor(snapshot.fanOutputVerified))
+                StatusRow(stringResource(R.string.safety_heater_output), "GPIO${snapshot.heaterGpio}", valueColor = if (snapshot.heaterOutputVerified) StatusColors.Good else StatusColors.Warning)
+                StatusRow(stringResource(R.string.safety_heater_output_verified), yesNo(snapshot.heaterOutputVerified), valueColor = verifyColor(snapshot.heaterOutputVerified))
+                StatusRow(stringResource(R.string.safety_moonraker_verified), yesNo(snapshot.moonrakerVerified), valueColor = verifyColor(snapshot.moonrakerVerified))
+                StatusRow(stringResource(R.string.safety_arm_prerequisites), if (latchPrerequisitesReady) stringResource(R.string.common_ready) else stringResource(R.string.common_incomplete), valueColor = if (latchPrerequisitesReady) StatusColors.Good else StatusColors.Warning)
+                StatusRow(stringResource(R.string.safety_gpio_probe_api), if (snapshot.gpioProbeLocked) stringResource(R.string.value_disabled) else stringResource(R.string.value_enabled), valueColor = if (snapshot.gpioProbeLocked) StatusColors.Good else StatusColors.Warning)
                 Text(
-                    "Use these confirmations only after physical inspection on the real device. The app stores verification flags first, then arms the runtime latch in a separate action.",
+                    stringResource(R.string.safety_workflow_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                SafetyAction("Confirm sensors inspected", snapshot.sensorsVerified) {
+                SafetyAction(confirmSensors, snapshot.sensorsVerified) {
                     onApplySafety(snapshot.copy(sensorsVerified = true), false, false)
                 }
-                SafetyAction("Confirm fan output inspected", snapshot.fanOutputVerified) {
+                SafetyAction(confirmFan, snapshot.fanOutputVerified) {
                     onApplySafety(snapshot.copy(fanOutputVerified = true), false, false)
                 }
-                SafetyAction("Confirm heater output inspected", snapshot.heaterOutputVerified) {
+                SafetyAction(confirmHeater, snapshot.heaterOutputVerified) {
                     onApplySafety(snapshot.copy(heaterOutputVerified = true), false, false)
                 }
-                SafetyAction("Confirm Moonraker read-only path", snapshot.moonrakerVerified) {
+                SafetyAction(confirmMoonraker, snapshot.moonrakerVerified) {
                     onApplySafety(snapshot.copy(moonrakerVerified = true), false, false)
                 }
 
@@ -116,14 +122,14 @@ fun SafetyScreen(
                         enabled = latchPrerequisitesReady && !snapshot.outputSafetyLatchArmed,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Arm latch")
+                        Text(stringResource(R.string.safety_arm_latch))
                     }
                     OutlinedButton(
                         onClick = { onApplySafety(snapshot, false, true) },
                         enabled = snapshot.outputSafetyLatchArmed,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Disarm")
+                        Text(stringResource(R.string.safety_disarm))
                     }
                 }
             }
@@ -138,7 +144,7 @@ private fun SafetyAction(label: String, done: Boolean, onClick: () -> Unit) {
         enabled = !done,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(if (done) "$label: done" else label)
+        Text(if (done) stringResource(R.string.safety_done, label) else label)
     }
 }
 
@@ -164,6 +170,7 @@ private fun safetyColor(score: Int) = when {
     else -> StatusColors.Danger
 }
 
-private fun yesNo(value: Boolean) = if (value) "Yes" else "No"
+@Composable
+private fun yesNo(value: Boolean) = if (value) stringResource(R.string.common_yes) else stringResource(R.string.common_no)
 
 private fun verifyColor(value: Boolean) = if (value) StatusColors.Good else StatusColors.Warning

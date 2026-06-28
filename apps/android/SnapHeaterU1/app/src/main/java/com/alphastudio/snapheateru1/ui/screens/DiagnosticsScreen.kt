@@ -17,8 +17,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.ble.SnapHeaterBleContract
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
@@ -29,7 +31,7 @@ import com.alphastudio.snapheateru1.ui.theme.StatusColors
 @Composable
 fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
     ScreenColumn {
-        SectionTitle("Diagnostics", "Connection, firmware and event details for bring-up")
+        SectionTitle(stringResource(R.string.diagnostics_title), stringResource(R.string.diagnostics_subtitle))
 
         Card(
             shape = RoundedCornerShape(8.dp),
@@ -39,12 +41,12 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                StatusRow("Device name", SnapHeaterBleContract.DeviceName)
-                StatusRow("BLE state", snapshot.ble)
-                StatusRow("Service", SnapHeaterBleContract.ServiceUuid.toString().take(13) + "...")
-                StatusRow("Firmware", snapshot.firmwareVersion)
-                StatusRow("Heater build", if (snapshot.heaterOutputBuildEnabled) "Enabled" else "Disabled", valueColor = if (snapshot.heaterOutputBuildEnabled) StatusColors.Warning else StatusColors.Good)
-                StatusRow("Moonraker", snapshot.moonraker, valueColor = StatusColors.Warning)
+                StatusRow(stringResource(R.string.diagnostics_device_name), SnapHeaterBleContract.DeviceName)
+                StatusRow(stringResource(R.string.diagnostics_ble_state), snapshot.ble)
+                StatusRow(stringResource(R.string.diagnostics_service), SnapHeaterBleContract.ServiceUuid.toString().take(13) + "...")
+                StatusRow(stringResource(R.string.diagnostics_firmware), snapshot.firmwareVersion)
+                StatusRow(stringResource(R.string.dashboard_heater_build), if (snapshot.heaterOutputBuildEnabled) stringResource(R.string.value_enabled) else stringResource(R.string.value_disabled), valueColor = if (snapshot.heaterOutputBuildEnabled) StatusColors.Warning else StatusColors.Good)
+                StatusRow(stringResource(R.string.dashboard_moonraker), snapshot.moonraker, valueColor = StatusColors.Warning)
             }
         }
 
@@ -56,13 +58,13 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                Text("Panda Breath hardware", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                StatusRow("Map", snapshot.hardwareMapName, valueColor = StatusColors.Good)
-                StatusRow("Heater relay", "GPIO${snapshot.heaterGpio}", valueColor = StatusColors.Warning)
-                StatusRow("Fan TRIAC gate", "GPIO${snapshot.fanGpio}", valueColor = StatusColors.Good)
-                StatusRow("Zero-cross", "GPIO${snapshot.zeroCrossGpio}", valueColor = StatusColors.Good)
-                StatusRow("Chamber / PTC ADC", "CH${snapshot.chamberAdcChannel} / CH${snapshot.ptcAdcChannel}")
-                StatusRow("K1/K2/K3 LEDs", "GPIO${snapshot.ledAutoGpio} / GPIO${snapshot.ledOnGpio} / GPIO${snapshot.ledOffGpio}")
+                Text(stringResource(R.string.diagnostics_hardware), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                StatusRow(stringResource(R.string.diagnostics_map), snapshot.hardwareMapName, valueColor = StatusColors.Good)
+                StatusRow(stringResource(R.string.diagnostics_heater_relay), "GPIO${snapshot.heaterGpio}", valueColor = StatusColors.Warning)
+                StatusRow(stringResource(R.string.diagnostics_fan_triac_gate), "GPIO${snapshot.fanGpio}", valueColor = StatusColors.Good)
+                StatusRow(stringResource(R.string.diagnostics_zero_cross), "GPIO${snapshot.zeroCrossGpio}", valueColor = StatusColors.Good)
+                StatusRow(stringResource(R.string.diagnostics_adc), "CH${snapshot.chamberAdcChannel} / CH${snapshot.ptcAdcChannel}")
+                StatusRow(stringResource(R.string.diagnostics_leds), "GPIO${snapshot.ledAutoGpio} / GPIO${snapshot.ledOnGpio} / GPIO${snapshot.ledOffGpio}")
             }
         }
 
@@ -74,12 +76,12 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                Text("Fan TRIAC timing", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                StatusRow("Driver", if (snapshot.fanTriacControl) "Phase-angle / zero-cross" else "Plain GPIO", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
-                StatusRow("Mains", "${snapshot.acMainsHz} Hz")
-                StatusRow("Run power", "${snapshot.fanTriacRunPercent}%")
-                StatusRow("Min delay", "${snapshot.fanTriacMinDelayUs} us")
-                StatusRow("Gate pulse", "${snapshot.fanTriacGatePulseUs} us")
+                Text(stringResource(R.string.diagnostics_fan_timing), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                StatusRow(stringResource(R.string.diagnostics_driver), if (snapshot.fanTriacControl) "Phase-angle / zero-cross" else "Plain GPIO", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
+                StatusRow(stringResource(R.string.diagnostics_mains), "${snapshot.acMainsHz} Hz")
+                StatusRow(stringResource(R.string.diagnostics_run_power), "${snapshot.fanTriacRunPercent}%")
+                StatusRow(stringResource(R.string.diagnostics_min_delay), "${snapshot.fanTriacMinDelayUs} us")
+                StatusRow(stringResource(R.string.diagnostics_gate_pulse), "${snapshot.fanTriacGatePulseUs} us")
             }
         }
 
@@ -91,7 +93,7 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                Text("Event log", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.diagnostics_event_log), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 LogLine("00:01", "App started in mock repository mode")
                 LogLine("00:03", "Hardware map loaded: ${snapshot.hardwareMapName}")
                 LogLine("00:05", "TRIAC fan: GPIO${snapshot.fanGpio} gate, GPIO${snapshot.zeroCrossGpio} zero-cross")
@@ -109,12 +111,12 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                Text("Reports and maintenance", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                StatusRow("Temperature history", if (snapshot.tempHistoryEnabled) "Enabled" else "Disabled", valueColor = if (snapshot.tempHistoryEnabled) StatusColors.Good else StatusColors.Warning)
-                StatusRow("Incident report", if (snapshot.incidentReportEnabled) "Enabled" else "Disabled", valueColor = if (snapshot.incidentReportEnabled) StatusColors.Good else StatusColors.Warning)
-                StatusRow("Airflow warning", if (snapshot.airflowWarningPending) "Pending" else "Clear", valueColor = if (snapshot.airflowWarningPending) StatusColors.Warning else StatusColors.Good)
-                StatusRow("Filter warning", if (snapshot.filterWarningPending) "Pending" else "Clear", valueColor = if (snapshot.filterWarningPending) StatusColors.Warning else StatusColors.Good)
-                StatusRow("OTA rollback", if (snapshot.otaRollbackReady) "Available" else "Placeholder")
+                Text(stringResource(R.string.diagnostics_reports), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                StatusRow(stringResource(R.string.settings_temperature_history), if (snapshot.tempHistoryEnabled) stringResource(R.string.value_enabled) else stringResource(R.string.value_disabled), valueColor = if (snapshot.tempHistoryEnabled) StatusColors.Good else StatusColors.Warning)
+                StatusRow(stringResource(R.string.diagnostics_incident_report), if (snapshot.incidentReportEnabled) stringResource(R.string.value_enabled) else stringResource(R.string.value_disabled), valueColor = if (snapshot.incidentReportEnabled) StatusColors.Good else StatusColors.Warning)
+                StatusRow(stringResource(R.string.diagnostics_airflow_warning), if (snapshot.airflowWarningPending) stringResource(R.string.common_pending) else stringResource(R.string.common_clear), valueColor = if (snapshot.airflowWarningPending) StatusColors.Warning else StatusColors.Good)
+                StatusRow(stringResource(R.string.diagnostics_filter_warning), if (snapshot.filterWarningPending) stringResource(R.string.common_pending) else stringResource(R.string.common_clear), valueColor = if (snapshot.filterWarningPending) StatusColors.Warning else StatusColors.Good)
+                StatusRow(stringResource(R.string.diagnostics_ota_rollback), if (snapshot.otaRollbackReady) stringResource(R.string.common_available) else stringResource(R.string.common_placeholder))
             }
         }
     }

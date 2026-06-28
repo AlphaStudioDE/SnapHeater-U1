@@ -22,8 +22,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.components.SectionTitle
@@ -38,7 +40,7 @@ fun SettingsScreen(
     onApplySettings: (HeaterSnapshot) -> Unit,
 ) {
     ScreenColumn {
-        SectionTitle("Settings", "Feature controls mirroring firmware settings and future BLE writes")
+        SectionTitle(stringResource(R.string.settings_title), stringResource(R.string.settings_subtitle))
 
         Card(
             shape = RoundedCornerShape(8.dp),
@@ -48,7 +50,7 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                Text("Temperature target", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.settings_temperature_target), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Text("${snapshot.targetC} C", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
                 Slider(
                     value = snapshot.targetC.toFloat(),
@@ -56,67 +58,67 @@ fun SettingsScreen(
                     valueRange = 30f..70f,
                     steps = 39,
                 )
-                StatusRow("Material profile", snapshot.material, valueColor = StatusColors.Normal)
-                StatusRow("Active recipe", snapshot.activeRecipeName)
-                StatusRow("Maximum UI target", "70 C")
+                StatusRow(stringResource(R.string.label_material_profile), snapshot.material, valueColor = StatusColors.Normal)
+                StatusRow(stringResource(R.string.settings_active_recipe), snapshot.activeRecipeName)
+                StatusRow(stringResource(R.string.settings_max_ui_target), "70 C")
             }
         }
 
-        SettingsCard("Material and print intelligence") {
-            ToggleRow("Auto material profile", snapshot.autoMaterialProfileEnabled) {
+        SettingsCard(stringResource(R.string.settings_material_print)) {
+            ToggleRow(stringResource(R.string.settings_auto_material_profile), snapshot.autoMaterialProfileEnabled) {
                 onSnapshotChange(snapshot.copy(autoMaterialProfileEnabled = it))
             }
-            ToggleRow("Profile mismatch warning", snapshot.mismatchWarningEnabled) {
+            ToggleRow(stringResource(R.string.settings_profile_mismatch), snapshot.mismatchWarningEnabled) {
                 onSnapshotChange(snapshot.copy(mismatchWarningEnabled = it))
             }
-            ToggleRow("PLA protection", snapshot.plaProtectionEnabled) {
+            ToggleRow(stringResource(R.string.settings_pla_protection), snapshot.plaProtectionEnabled) {
                 onSnapshotChange(snapshot.copy(plaProtectionEnabled = it))
             }
-            ToggleRow("Print risk score", snapshot.startPrintWarningEnabled) {
+            ToggleRow(stringResource(R.string.settings_print_risk_score), snapshot.startPrintWarningEnabled) {
                 onSnapshotChange(snapshot.copy(startPrintWarningEnabled = it))
             }
-            StatusRow("Current risk", "${snapshot.printRiskScore}%", valueColor = riskColor(snapshot.printRiskScore))
-            StatusRow("Advice", snapshot.materialAdvice)
+            StatusRow(stringResource(R.string.settings_current_risk), "${snapshot.printRiskScore}%", valueColor = riskColor(snapshot.printRiskScore))
+            StatusRow(stringResource(R.string.settings_advice), snapshot.materialAdvice)
         }
 
-        SettingsCard("Chamber intelligence") {
-            ToggleRow("Heat soak / stability lock", snapshot.heatSoakEnabled) {
+        SettingsCard(stringResource(R.string.settings_chamber)) {
+            ToggleRow(stringResource(R.string.settings_heat_soak_stability), snapshot.heatSoakEnabled) {
                 onSnapshotChange(snapshot.copy(heatSoakEnabled = it))
             }
-            ToggleRow("Anti-warp", snapshot.antiWarpEnabled) {
+            ToggleRow(stringResource(R.string.settings_anti_warp), snapshot.antiWarpEnabled) {
                 onSnapshotChange(snapshot.copy(antiWarpEnabled = it))
             }
-            ToggleRow("Large print protection", snapshot.largePrintProtectionEnabled) {
+            ToggleRow(stringResource(R.string.settings_large_print), snapshot.largePrintProtectionEnabled) {
                 onSnapshotChange(snapshot.copy(largePrintProtectionEnabled = it))
             }
-            ToggleRow("Safe overnight", snapshot.safeOvernightEnabled) {
+            ToggleRow(stringResource(R.string.settings_safe_overnight), snapshot.safeOvernightEnabled) {
                 onSnapshotChange(snapshot.copy(safeOvernightEnabled = it))
             }
-            ToggleRow("Pause hold", snapshot.pauseHoldEnabled) {
+            ToggleRow(stringResource(R.string.settings_pause_hold), snapshot.pauseHoldEnabled) {
                 onSnapshotChange(snapshot.copy(pauseHoldEnabled = it))
             }
-            ToggleRow("Smart resume", snapshot.smartResumeEnabled) {
+            ToggleRow(stringResource(R.string.settings_smart_resume), snapshot.smartResumeEnabled) {
                 onSnapshotChange(snapshot.copy(smartResumeEnabled = it))
             }
         }
 
-        SettingsCard("Post-print and service") {
-            ToggleRow("Virtual door detection", snapshot.virtualDoorDetectionEnabled) {
+        SettingsCard(stringResource(R.string.settings_post_service)) {
+            ToggleRow(stringResource(R.string.settings_virtual_door), snapshot.virtualDoorDetectionEnabled) {
                 onSnapshotChange(snapshot.copy(virtualDoorDetectionEnabled = it))
             }
-            ToggleRow("Airflow detection", snapshot.airflowDetectionEnabled) {
+            ToggleRow(stringResource(R.string.settings_airflow_detection), snapshot.airflowDetectionEnabled) {
                 onSnapshotChange(snapshot.copy(airflowDetectionEnabled = it))
             }
-            ToggleRow("Temperature history", snapshot.tempHistoryEnabled) {
+            ToggleRow(stringResource(R.string.settings_temperature_history), snapshot.tempHistoryEnabled) {
                 onSnapshotChange(snapshot.copy(tempHistoryEnabled = it))
             }
-            ToggleRow("Incident reports", snapshot.incidentReportEnabled) {
+            ToggleRow(stringResource(R.string.settings_incident_reports), snapshot.incidentReportEnabled) {
                 onSnapshotChange(snapshot.copy(incidentReportEnabled = it))
             }
-            ToggleRow("Local recipes", snapshot.localRecipesEnabled) {
+            ToggleRow(stringResource(R.string.settings_local_recipes), snapshot.localRecipesEnabled) {
                 onSnapshotChange(snapshot.copy(localRecipesEnabled = it))
             }
-            ToggleRow("Scheduled preheat", snapshot.scheduledPreheatEnabled) {
+            ToggleRow(stringResource(R.string.settings_scheduled_preheat), snapshot.scheduledPreheatEnabled) {
                 onSnapshotChange(snapshot.copy(scheduledPreheatEnabled = it))
             }
         }
@@ -129,24 +131,24 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
-                Text("Connectivity and productization", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                ToggleRow("Local-only mode", snapshot.localOnlyMode) {
+                Text(stringResource(R.string.settings_connectivity), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                ToggleRow(stringResource(R.string.settings_local_only_mode), snapshot.localOnlyMode) {
                     onSnapshotChange(snapshot.copy(localOnlyMode = it))
                 }
-                ToggleRow("Firmware demo mode", snapshot.demoModeEnabled) {
+                ToggleRow(stringResource(R.string.settings_firmware_demo_mode), snapshot.demoModeEnabled) {
                     onSnapshotChange(snapshot.copy(demoModeEnabled = it))
                 }
-                ToggleRow("Showcase mode", snapshot.showcaseModeEnabled) {
+                ToggleRow(stringResource(R.string.settings_showcase_mode), snapshot.showcaseModeEnabled) {
                     onSnapshotChange(snapshot.copy(showcaseModeEnabled = it))
                 }
-                ToggleRow("U1 Symbiont Mode", snapshot.symbiontModeEnabled) {
+                ToggleRow(stringResource(R.string.settings_symbiont_mode), snapshot.symbiontModeEnabled) {
                     onSnapshotChange(snapshot.copy(symbiontModeEnabled = it))
                 }
-                ToggleRow("Symbiont ventilation", snapshot.symbiontVentilationAllowed) {
+                ToggleRow(stringResource(R.string.settings_symbiont_ventilation), snapshot.symbiontVentilationAllowed) {
                     onSnapshotChange(snapshot.copy(symbiontVentilationAllowed = it))
                 }
                 Text(
-                    "Cloud features stay out of scope. Future writes should go through local BLE or LAN REST only.",
+                    stringResource(R.string.settings_cloud_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -157,7 +159,7 @@ fun SettingsScreen(
             onClick = { onApplySettings(snapshot) },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Apply settings")
+            Text(stringResource(R.string.settings_apply))
         }
     }
 }

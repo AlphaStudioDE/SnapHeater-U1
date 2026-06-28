@@ -6,11 +6,11 @@
 
 package com.alphastudio.snapheateru1.model
 
-enum class AppMode(val label: String, val detail: String) {
-    AutoStandby("Auto standby", "Printer-aware chamber mode"),
-    ManualHold("Manual hold", "Local target hold"),
-    Preheat("Preheat", "Warm chamber before print"),
-    Drying("Drying", "Material drying profile"),
-    Tempering("Tempering", "Post-print controlled cooldown"),
-    SafeStop("Safe stop", "Stop heating workflow"),
+enum class AppMode {
+    AutoStandby,
+    ManualHold,
+    Preheat,
+    Drying,
+    Tempering,
+    SafeStop,
 }

@@ -6,6 +6,7 @@
 
 package com.alphastudio.snapheateru1.ui
 
+import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -33,10 +34,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
+import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.data.FirmwareSnapHeaterRepository
 import com.alphastudio.snapheateru1.data.SnapHeaterApiClient
 import com.alphastudio.snapheateru1.data.normalizeBaseUrl
@@ -58,17 +62,34 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SnapHeaterApp() {
+    val context = LocalContext.current
+    val preferences = remember(context) {
+        context.getSharedPreferences("snapheater_u1", Context.MODE_PRIVATE)
+    }
     var appSessionName by rememberSaveable { mutableStateOf(AppSession.Connect.name) }
     var selectedTabName by rememberSaveable { mutableStateOf(AppTab.Dashboard.name) }
-    var deviceAddress by rememberSaveable { mutableStateOf("") }
+    var deviceAddress by rememberSaveable { mutableStateOf(preferences.getString("device_address", "") ?: "") }
     var connectedBaseUrl by rememberSaveable { mutableStateOf("") }
-    var connectionStatus by rememberSaveable { mutableStateOf("Ready") }
+    var connectionStatus by rememberSaveable { mutableStateOf(context.getString(R.string.status_ready)) }
     var isConnecting by rememberSaveable { mutableStateOf(false) }
     var snapshot by rememberSaveable(stateSaver = HeaterSnapshotSaver) {
         mutableStateOf(HeaterSnapshot(ble = "Demo mode"))
     }
     val appSession = AppSession.valueOf(appSessionName)
     val selectedTab = AppTab.valueOf(selectedTabName)
+    val modeLabel = stringResource(snapshot.mode.labelRes())
+    val heatingAllowed = snapshot.heaterOutputBuildEnabled &&
+        snapshot.outputSafetyLatchArmed &&
+        snapshot.outputSafetyLatchReady &&
+        snapshot.heaterOutputVerified &&
+        snapshot.fanOutputVerified &&
+        snapshot.sensorsVerified
+    val safetyWarning = when {
+        !snapshot.heaterOutputBuildEnabled -> stringResource(R.string.modes_block_build)
+        !snapshot.heaterOutputVerified || !snapshot.fanOutputVerified || !snapshot.sensorsVerified -> stringResource(R.string.modes_block_verification)
+        !snapshot.outputSafetyLatchArmed || !snapshot.outputSafetyLatchReady -> stringResource(R.string.modes_block_latch)
+        else -> stringResource(R.string.modes_available)
+    }
     val scope = rememberCoroutineScope()
     val firmwareRepository = remember(connectedBaseUrl) {
         if (connectedBaseUrl.isBlank()) null else FirmwareSnapHeaterRepository(SnapHeaterApiClient(connectedBaseUrl))
@@ -82,9 +103,9 @@ fun SnapHeaterApp() {
                 withContext(Dispatchers.IO) { repository.snapshot() }
             }.onSuccess { latest ->
                 snapshot = latest.copy(lastConfirmedSettings = snapshot.lastConfirmedSettings)
-                connectionStatus = "Connected to $connectedBaseUrl"
+                connectionStatus = context.getString(R.string.status_connected_to, connectedBaseUrl)
             }.onFailure { error ->
-                connectionStatus = "Connection lost: ${error.shortMessage()}"
+                connectionStatus = context.getString(R.string.status_connection_lost, error.shortMessage())
                 snapshot = snapshot.copy(ble = "LAN error")
             }
             delay(3000)
@@ -99,12 +120,13 @@ fun SnapHeaterApp() {
                 isConnecting = isConnecting,
                 onDeviceAddress = {
                     deviceAddress = it
-                    connectionStatus = "Ready"
+                    preferences.edit().putString("device_address", it).apply()
+                    connectionStatus = context.getString(R.string.status_ready)
                 },
                 onConnect = {
                     val baseUrl = normalizeBaseUrl(deviceAddress)
                     isConnecting = true
-                    connectionStatus = "Connecting"
+                    connectionStatus = context.getString(R.string.status_connecting)
                     scope.launch {
                         runCatching {
                             withContext(Dispatchers.IO) {
@@ -112,11 +134,12 @@ fun SnapHeaterApp() {
                             }
                         }.onSuccess { latest ->
                             connectedBaseUrl = baseUrl
+                            preferences.edit().putString("device_address", baseUrl).apply()
                             snapshot = latest
-                            connectionStatus = "Connected to $baseUrl"
+                            connectionStatus = context.getString(R.string.status_connected_to, baseUrl)
                             appSessionName = AppSession.Demo.name
                         }.onFailure { error ->
-                            connectionStatus = "Connection failed: ${error.shortMessage()}"
+                            connectionStatus = context.getString(R.string.status_connection_failed, error.shortMessage())
                         }
                         isConnecting = false
                     }
@@ -124,7 +147,7 @@ fun SnapHeaterApp() {
                 onDemoMode = {
                     connectedBaseUrl = ""
                     appSessionName = AppSession.Demo.name
-                    snapshot = snapshot.copy(ble = "Demo mode")
+                    snapshot = snapshot.copy(ble = context.getString(R.string.status_demo_mode))
                 },
             )
         }
@@ -134,24 +157,27 @@ fun SnapHeaterApp() {
     SnapHeaterScaffold(
         selectedTab = selectedTab,
         snapshot = snapshot,
+        modeLabel = modeLabel,
         connectionStatus = connectionStatus,
         onTab = { selectedTabName = it.name },
         onReconnect = {
             appSessionName = AppSession.Connect.name
             selectedTabName = AppTab.Dashboard.name
             connectedBaseUrl = ""
-            connectionStatus = "Ready"
-            snapshot = snapshot.copy(ble = "Disconnected")
+            connectionStatus = context.getString(R.string.status_ready)
+            snapshot = snapshot.copy(ble = context.getString(R.string.status_disconnected))
         },
     ) { tab ->
         when (tab) {
             AppTab.Dashboard -> DashboardScreen(snapshot)
             AppTab.Modes -> ModesScreen(
                 snapshot = snapshot,
+                heatingAllowed = heatingAllowed,
+                safetyWarning = safetyWarning,
                 onMode = { mode ->
                     snapshot = snapshot.copy(
                         mode = mode,
-                        lastConfirmedSettings = "Pending ${mode.label} settings",
+                        lastConfirmedSettings = context.getString(R.string.common_pending),
                     )
                 },
                 onSnapshotChange = { updated -> snapshot = updated },
@@ -164,10 +190,10 @@ fun SnapHeaterApp() {
                                 withContext(Dispatchers.IO) { repository.applySettings(confirmed) }
                             }.onSuccess { latest ->
                                 snapshot = latest.copy(lastConfirmedSettings = confirmed.lastConfirmedSettings)
-                                connectionStatus = "Settings confirmed"
+                                connectionStatus = context.getString(R.string.status_settings_confirmed)
                             }.onFailure { error ->
-                                connectionStatus = "Settings failed: ${error.shortMessage()}"
-                                snapshot = confirmed.copy(lastConfirmedSettings = "Pending ${confirmed.mode.label} settings")
+                                connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
+                                snapshot = confirmed.copy(lastConfirmedSettings = context.getString(R.string.common_pending))
                             }
                         }
                     }
@@ -183,11 +209,11 @@ fun SnapHeaterApp() {
                             runCatching {
                                 withContext(Dispatchers.IO) { repository.applySafety(updated, armLatch, disarmLatch) }
                             }.onSuccess { latest ->
-                                snapshot = latest.copy(lastConfirmedSettings = "Safety state applied")
-                                connectionStatus = "Safety state applied"
+                                snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.status_safety_applied))
+                                connectionStatus = context.getString(R.string.status_safety_applied)
                             }.onFailure { error ->
-                                connectionStatus = "Safety update failed: ${error.shortMessage()}"
-                                snapshot = updated.copy(lastConfirmedSettings = "Safety state pending")
+                                connectionStatus = context.getString(R.string.status_safety_failed, error.shortMessage())
+                                snapshot = updated.copy(lastConfirmedSettings = context.getString(R.string.status_safety_pending))
                             }
                         }
                     } else {
@@ -202,7 +228,7 @@ fun SnapHeaterApp() {
                                 updated.heaterOutputVerified &&
                                 updated.fanOutputVerified &&
                                 updated.sensorsVerified,
-                            lastConfirmedSettings = "Safety state applied in demo",
+                            lastConfirmedSettings = context.getString(R.string.status_safety_applied_demo),
                         )
                     }
                 },
@@ -213,22 +239,22 @@ fun SnapHeaterApp() {
                 onTarget = { target -> snapshot = snapshot.copy(targetC = target) },
                 onSnapshotChange = { updated -> snapshot = updated },
                 onApplySettings = { updated ->
-                    snapshot = updated.copy(lastConfirmedSettings = "Applying settings")
+                    snapshot = updated.copy(lastConfirmedSettings = context.getString(R.string.status_applying_settings))
                     val repository = firmwareRepository
                     if (repository != null) {
                         scope.launch {
                             runCatching {
                                 withContext(Dispatchers.IO) { repository.applySettings(updated) }
                             }.onSuccess { latest ->
-                                snapshot = latest.copy(lastConfirmedSettings = "Settings applied")
-                                connectionStatus = "Settings applied"
+                                snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.status_settings_applied))
+                                connectionStatus = context.getString(R.string.status_settings_applied)
                             }.onFailure { error ->
-                                connectionStatus = "Settings failed: ${error.shortMessage()}"
-                                snapshot = updated.copy(lastConfirmedSettings = "Settings pending")
+                                connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
+                                snapshot = updated.copy(lastConfirmedSettings = context.getString(R.string.status_settings_pending))
                             }
                         }
                     } else {
-                        snapshot = updated.copy(lastConfirmedSettings = "Settings applied in demo")
+                        snapshot = updated.copy(lastConfirmedSettings = context.getString(R.string.status_settings_applied_demo))
                     }
                 },
             )
@@ -243,6 +269,7 @@ private fun Throwable.shortMessage(): String = message?.take(80) ?: this::class.
 private fun SnapHeaterScaffold(
     selectedTab: AppTab,
     snapshot: HeaterSnapshot,
+    modeLabel: String,
     connectionStatus: String,
     onTab: (AppTab) -> Unit,
     onReconnect: () -> Unit,
@@ -253,9 +280,9 @@ private fun SnapHeaterScaffold(
             TopAppBar(
                 title = {
                     Column {
-                        Text("SnapHeater U1", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.app_name), fontWeight = FontWeight.Bold)
                         Text(
-                            "${snapshot.ble} / ${snapshot.mode.label} / $connectionStatus",
+                            "${snapshot.ble} / $modeLabel / $connectionStatus",
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -265,7 +292,7 @@ private fun SnapHeaterScaffold(
                 },
                 actions = {
                     IconButton(onClick = onReconnect) {
-                        Icon(Icons.Filled.Close, contentDescription = "Change device")
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_change_device))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -277,8 +304,8 @@ private fun SnapHeaterScaffold(
                     NavigationBarItem(
                         selected = selectedTab == tab,
                         onClick = { onTab(tab) },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) },
+                        icon = { Icon(tab.icon, contentDescription = stringResource(tab.labelRes)) },
+                        label = { Text(stringResource(tab.labelRes)) },
                     )
                 }
             }

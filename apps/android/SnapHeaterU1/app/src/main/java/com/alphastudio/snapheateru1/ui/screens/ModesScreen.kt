@@ -22,27 +22,48 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.model.AppMode
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.components.SectionTitle
 import com.alphastudio.snapheateru1.ui.components.StatusRow
+import com.alphastudio.snapheateru1.ui.detailRes
+import com.alphastudio.snapheateru1.ui.labelRes
 import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
 @Composable
 fun ModesScreen(
     snapshot: HeaterSnapshot,
+    heatingAllowed: Boolean,
+    safetyWarning: String,
     onMode: (AppMode) -> Unit,
     onSnapshotChange: (HeaterSnapshot) -> Unit,
     onConfirmSettings: (HeaterSnapshot) -> Unit,
 ) {
     ScreenColumn {
-        SectionTitle("Modes", "Choose a workflow. Unsafe outputs stay blocked in mock and locked firmware states.")
+        SectionTitle(stringResource(R.string.modes_title), stringResource(R.string.modes_subtitle))
+        if (!heatingAllowed) {
+            Card(
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                Text(
+                    safetyWarning,
+                    color = StatusColors.Warning,
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
 
         AppMode.entries.forEach { mode ->
             val selected = snapshot.mode == mode
+            val blocked = mode != AppMode.SafeStop && !heatingAllowed
+            val modeLabel = stringResource(mode.labelRes())
             Card(
                 shape = RoundedCornerShape(8.dp),
                 colors = CardDefaults.cardColors(
@@ -53,20 +74,25 @@ fun ModesScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth().padding(14.dp),
                 ) {
-                    Text(mode.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(mode.detail, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(modeLabel, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(stringResource(mode.detailRes()), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (selected) {
                         ModeSettingsPanel(
                             snapshot = snapshot,
+                            heatingAllowed = heatingAllowed,
                             onSnapshotChange = onSnapshotChange,
                             onConfirmSettings = onConfirmSettings,
                         )
                         Button(onClick = { onMode(AppMode.SafeStop) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Safe stop")
+                            Text(stringResource(R.string.mode_safe_stop))
                         }
                     } else {
-                        OutlinedButton(onClick = { onMode(mode) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Select")
+                        OutlinedButton(
+                            onClick = { onMode(mode) },
+                            enabled = !blocked,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(stringResource(R.string.modes_select))
                         }
                     }
                 }
@@ -78,65 +104,69 @@ fun ModesScreen(
 @Composable
 private fun ModeSettingsPanel(
     snapshot: HeaterSnapshot,
+    heatingAllowed: Boolean,
     onSnapshotChange: (HeaterSnapshot) -> Unit,
     onConfirmSettings: (HeaterSnapshot) -> Unit,
 ) {
+    val blocked = snapshot.mode != AppMode.SafeStop && !heatingAllowed
+    val modeLabel = stringResource(snapshot.mode.labelRes())
+    val pendingLabel = stringResource(R.string.common_pending)
     Column(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
     ) {
-        Text("Mode settings", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-        StatusRow("Saved state", snapshot.lastConfirmedSettings, valueColor = confirmColor(snapshot))
+        Text(stringResource(R.string.modes_mode_settings), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        StatusRow(stringResource(R.string.label_saved_state), snapshot.lastConfirmedSettings, valueColor = confirmColor(snapshot, modeLabel))
 
         when (snapshot.mode) {
             AppMode.AutoStandby -> {
-                StatusRow("Printer awareness", "Moonraker read-only", valueColor = StatusColors.Warning)
-                StatusRow("Material profile", snapshot.material)
+                StatusRow(stringResource(R.string.label_printer_awareness), stringResource(R.string.value_moonraker_readonly), valueColor = StatusColors.Warning)
+                StatusRow(stringResource(R.string.label_material_profile), snapshot.material)
                 TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
                 }
             }
             AppMode.ManualHold -> {
                 TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
                 }
-                ToggleRow("Fan assist", snapshot.manualFanAssist) {
-                    onSnapshotChange(snapshot.copy(manualFanAssist = it).pendingSettings())
+                ToggleRow(stringResource(R.string.label_fan_assist), snapshot.manualFanAssist) {
+                    onSnapshotChange(snapshot.copy(manualFanAssist = it).pendingSettings(pendingLabel))
                 }
-                StatusRow("Runtime guard", "Enabled", valueColor = StatusColors.Good)
+                StatusRow(stringResource(R.string.label_runtime_guard), stringResource(R.string.value_enabled), valueColor = StatusColors.Good)
             }
             AppMode.Preheat -> {
                 TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
                 }
-                DurationSlider("Heat soak", snapshot.preheatHeatSoakMin, 5f..45f) {
-                    onSnapshotChange(snapshot.copy(preheatHeatSoakMin = it).pendingSettings())
+                DurationSlider(stringResource(R.string.label_heat_soak), snapshot.preheatHeatSoakMin, 5f..45f) {
+                    onSnapshotChange(snapshot.copy(preheatHeatSoakMin = it).pendingSettings(pendingLabel))
                 }
-                StatusRow("Start condition", "Manual confirm", valueColor = StatusColors.Warning)
+                StatusRow(stringResource(R.string.label_start_condition), stringResource(R.string.value_manual_confirm), valueColor = StatusColors.Warning)
             }
             AppMode.Drying -> {
                 TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
                 }
-                DurationSlider("Drying time", snapshot.dryingTimeMin, 30f..360f) {
-                    onSnapshotChange(snapshot.copy(dryingTimeMin = it).pendingSettings())
+                DurationSlider(stringResource(R.string.label_drying_time), snapshot.dryingTimeMin, 30f..360f) {
+                    onSnapshotChange(snapshot.copy(dryingTimeMin = it).pendingSettings(pendingLabel))
                 }
-                StatusRow("Profile", snapshot.material)
+                StatusRow(stringResource(R.string.label_profile), snapshot.material)
             }
             AppMode.Tempering -> {
-                DurationSlider("Cooldown time", snapshot.temperingDurationMin, 10f..180f) {
-                    onSnapshotChange(snapshot.copy(temperingDurationMin = it).pendingSettings())
+                DurationSlider(stringResource(R.string.label_cooldown_time), snapshot.temperingDurationMin, 10f..180f) {
+                    onSnapshotChange(snapshot.copy(temperingDurationMin = it).pendingSettings(pendingLabel))
                 }
                 TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings())
+                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
                 }
-                StatusRow("Ramp behavior", "Controlled cooldown", valueColor = StatusColors.Good)
+                StatusRow(stringResource(R.string.label_ramp_behavior), stringResource(R.string.value_controlled_cooldown), valueColor = StatusColors.Good)
             }
             AppMode.SafeStop -> {
-                StatusRow("Heater", "Off / locked", strong = true, valueColor = StatusColors.Good)
-                StatusRow("Fan", "Cooldown allowed", valueColor = StatusColors.Warning)
+                StatusRow(stringResource(R.string.label_heater), stringResource(R.string.value_off_locked), strong = true, valueColor = StatusColors.Good)
+                StatusRow(stringResource(R.string.label_fan), stringResource(R.string.value_cooldown_allowed), valueColor = StatusColors.Warning)
                 Text(
-                    "Safe stop keeps the UI in a recovery state until the next mode is selected.",
+                    stringResource(R.string.modes_safe_stop_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -146,19 +176,20 @@ private fun ModeSettingsPanel(
         Button(
             onClick = {
                 onConfirmSettings(
-                    snapshot.copy(lastConfirmedSettings = confirmedSummary(snapshot)),
+                    snapshot.copy(lastConfirmedSettings = confirmedSummary(snapshot, modeLabel)),
                 )
             },
+            enabled = !blocked,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Confirm settings")
+            Text(stringResource(R.string.modes_confirm_settings))
         }
     }
 }
 
 @Composable
 private fun TargetSlider(targetC: Int, onTarget: (Int) -> Unit) {
-    Text("Target: $targetC C", color = StatusColors.Warning, fontWeight = FontWeight.Bold)
+    Text(stringResource(R.string.modes_target, targetC), color = StatusColors.Warning, fontWeight = FontWeight.Bold)
     Slider(
         value = targetC.toFloat(),
         onValueChange = { onTarget(it.toInt()) },
@@ -174,7 +205,7 @@ private fun DurationSlider(
     range: ClosedFloatingPointRange<Float>,
     onValue: (Int) -> Unit,
 ) {
-    Text("$label: $value min", color = StatusColors.Normal, fontWeight = FontWeight.Bold)
+    Text(stringResource(R.string.modes_duration, label, value), color = StatusColors.Normal, fontWeight = FontWeight.Bold)
     Slider(
         value = value.toFloat(),
         onValueChange = { onValue(it.toInt()) },
@@ -191,17 +222,17 @@ private fun ToggleRow(label: String, checked: Boolean, onChecked: (Boolean) -> U
     }
 }
 
-private fun confirmColor(snapshot: HeaterSnapshot) =
-    if (snapshot.lastConfirmedSettings.startsWith(snapshot.mode.label)) StatusColors.Good else StatusColors.Warning
+private fun confirmColor(snapshot: HeaterSnapshot, modeLabel: String) =
+    if (snapshot.lastConfirmedSettings.startsWith(modeLabel)) StatusColors.Good else StatusColors.Warning
 
-private fun HeaterSnapshot.pendingSettings() =
-    copy(lastConfirmedSettings = "Pending ${mode.label} settings")
+private fun HeaterSnapshot.pendingSettings(pendingLabel: String) =
+    copy(lastConfirmedSettings = pendingLabel)
 
-private fun confirmedSummary(snapshot: HeaterSnapshot): String = when (snapshot.mode) {
-    AppMode.AutoStandby -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C"
-    AppMode.ManualHold -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C / fan ${if (snapshot.manualFanAssist) "on" else "off"}"
-    AppMode.Preheat -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C / soak ${snapshot.preheatHeatSoakMin} min"
-    AppMode.Drying -> "${snapshot.mode.label} confirmed / target ${snapshot.targetC} C / ${snapshot.dryingTimeMin} min"
-    AppMode.Tempering -> "${snapshot.mode.label} confirmed / ${snapshot.temperingDurationMin} min / target ${snapshot.targetC} C"
-    AppMode.SafeStop -> "${snapshot.mode.label} confirmed / outputs stopped"
+private fun confirmedSummary(snapshot: HeaterSnapshot, modeLabel: String): String = when (snapshot.mode) {
+    AppMode.AutoStandby -> "$modeLabel / ${snapshot.targetC} C"
+    AppMode.ManualHold -> "$modeLabel / ${snapshot.targetC} C / fan ${if (snapshot.manualFanAssist) "on" else "off"}"
+    AppMode.Preheat -> "$modeLabel / ${snapshot.targetC} C / soak ${snapshot.preheatHeatSoakMin} min"
+    AppMode.Drying -> "$modeLabel / ${snapshot.targetC} C / ${snapshot.dryingTimeMin} min"
+    AppMode.Tempering -> "$modeLabel / ${snapshot.temperingDurationMin} min / ${snapshot.targetC} C"
+    AppMode.SafeStop -> "$modeLabel / outputs stopped"
 }
