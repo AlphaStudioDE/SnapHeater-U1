@@ -16,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -152,13 +153,25 @@ private fun SafetyAction(label: String, done: Boolean, onClick: () -> Unit) {
 private fun SafetyStep(label: String, checked: Boolean) {
     Card(
         shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (checked) StatusColors.Good.copy(alpha = 0.5f) else StatusColors.Warning.copy(alpha = 0.5f),
+        ),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         androidx.compose.foundation.layout.Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth().padding(10.dp),
         ) {
-            Checkbox(checked = checked, onCheckedChange = null)
+            Checkbox(
+                checked = checked,
+                onCheckedChange = null,
+                colors = CheckboxDefaults.colors(
+                    checkedColor = StatusColors.Good,
+                    uncheckedColor = StatusColors.Warning,
+                    checkmarkColor = MaterialTheme.colorScheme.background,
+                ),
+            )
             Text(label, modifier = Modifier.weight(1f), color = if (checked) StatusColors.Good else StatusColors.Warning)
         }
     }
