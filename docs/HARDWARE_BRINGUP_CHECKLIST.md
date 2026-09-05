@@ -1,6 +1,7 @@
 # SnapHeater U1 Hardware Bring-Up Checklist
 
-Use this checklist when the Panda Breath-style ESP32-C3 heater hardware is physically available.
+Use this checklist for SnapHeater U1 on original Panda Breath V1.0/V1.0.1
+electronics. It does not cover AirGuard 300.
 
 The goal is to move from an untouched device to a safe SnapHeater U1 test boot without energizing the heater unexpectedly.
 
@@ -77,19 +78,22 @@ idf.py set-target esp32c3
 idf.py build
 ```
 
-Required defaults:
+Required defaults for a no-output bring-up build:
 
 ```txt
-CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n
 CONFIG_SHU1_ENABLE_GPIO_PROBE=n
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 ```
 
-Do not continue if heater output or GPIO probe is enabled by accident.
+Do not build with physical outputs enabled until the non-heating hardware layer
+has passed the checks below. Do not
+continue if `/api/status` reports `heater_output_on=true`, `fan_output_on=true`,
+or an armed latch during an observation-only test.
 
-## 5. First SnapHeater Flash: Heater Locked
+## 5. First SnapHeater Flash: Observation Only
 
-Only flash a build where normal heater output is disabled.
+For the first flash, use either a no-output build or a build where runtime
+state starts with outputs off and the latch disarmed.
 
 ```bash
 idf.py -p <PORT> flash monitor
@@ -100,14 +104,16 @@ First boot checks:
 - Firmware name appears in UART log.
 - No reset loop.
 - No brownout.
-- Heater output reports disabled or locked.
+- Heater output reports off.
+- Fan output reports off.
+- Output Safety Latch reports not armed / not ready.
 - GPIO probe reports disabled.
 - Wi-Fi initialization does not crash.
 - BLE initialization does not crash.
 - REST server initialization does not crash.
 - Event log records boot/startup events.
 
-Do not connect or trust heater output yet.
+Do not command heating during this stage.
 
 ## 6. Local REST Smoke Test
 
@@ -122,10 +128,36 @@ curl http://<snapheater-ip>/api/events
 Expected:
 
 - JSON responses are valid.
-- Firmware reports heater output locked.
+- Firmware reports heater and fan outputs off.
+- `runtime.zero_cross_*` fields are present.
 - Runtime status is stable.
 - Temperature fields are present.
 - No fault storm or reboot loop.
+
+## 6A. Zero-Cross Observation
+
+With the board fully assembled, covers in a safe state, and mains connected
+only when it is physically safe to do so, observe zero-cross without requesting
+fan or heater output:
+
+```bash
+curl http://<snapheater-ip>/api/status
+```
+
+Expected on 50 Hz mains:
+
+- `runtime.zero_cross_signal_present` is `true`.
+- `runtime.zero_cross_edges_per_sec` is near `100` if both half-cycles are reported.
+- `runtime.zero_cross_last_period_us` is near `10000`.
+- `runtime.heater_output_on` remains `false`.
+- `runtime.fan_output_on` remains `false`.
+
+Expected when mains is absent or the detector is not receiving AC:
+
+- `runtime.zero_cross_signal_present` is `false`.
+- `runtime.zero_cross_edges_per_sec` is `0` or remains stale.
+
+Do not request the held-gate fan until zero-cross is stable.
 
 ## 7. BLE Smoke Test
 
@@ -155,16 +187,16 @@ Do not continue to output testing if ADC conversion is wrong.
 ## 9. Buttons And LEDs
 
 - Treat GPIO7 as a zero-cross detector first, not as a simple button.
-- Do not enable K1 button behavior until GPIO7 pulse-width handling is implemented.
-- Treat GPIO0 as shared with the K2 button net and avoid configuring it as a
-  button while it is needed for chamber ADC validation.
-- GPIO2 is the K3 button net.
-- GPIO6, GPIO5 and GPIO4 are K1/K2/K3 LED nets.
+- Do not reconfigure GPIO7 away from its zero-cross interrupt role.
+- Keep GPIO0/GPIO1 exclusively as chamber/PTC NTC ADC inputs.
+- Power/Auto/On/Dry buttons are GPIO9/GPIO8/GPIO10/GPIO2, active low.
+- GPIO9/GPIO8/GPIO2 are strapping pins: a held-at-boot button must remain
+  ignored until its first release.
+- Auto/On/Dry LEDs are GPIO6/GPIO5/GPIO4, active high.
+- Leave the GPIO21 Power LED disabled while UART0 TX is in use.
 - Test each known physical button.
 - Confirm short press and long press behavior.
-- Confirm OFF or emergency safe-off input is detected.
-- Leave unknown button GPIOs at `-1`.
-- Leave unknown LED GPIOs at `-1`.
+- Confirm every long press produces emergency safe-off.
 
 Physical controls must not bypass the safety latch.
 
@@ -172,11 +204,12 @@ Physical controls must not bypass the safety latch.
 
 Only after board inspection:
 
-- Enable GPIO probe only for a supervised fan test.
+- Enable guarded diagnostics only for a supervised fan test.
 - Keep normal heater output disabled.
-- Pulse fan first.
+- Test the fan first.
 - GPIO3 is the fan TRIAC gate.
-- Confirm GPIO7 zero-cross behavior before relying on phase-angle fan control.
+- Confirm GPIO7 zero-cross behavior through `/api/status` before requesting fan ON.
+- Confirm GPIO3 stays HIGH while ON and goes LOW immediately on OFF; do not use PWM or gate pulses.
 - Confirm fan GPIO and active polarity.
 - Confirm fan can run without heater.
 - Follow Unlock Level L1 in [SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md).
@@ -198,7 +231,7 @@ Disable GPIO probe again after the test.
 
 ## 11. Heater Probe Readiness
 
-Do not pulse the heater until all of these are true:
+Do not run the first low-target PID heating test until all of these are true:
 
 - Heater connector and MOSFET path are identified.
 - GPIO18 is the PTC relay driver.
@@ -209,12 +242,14 @@ Do not pulse the heater until all of these are true:
 - PTC sensor is valid.
 - Current path and power cutoff are understood.
 - Output Safety Latch status is understood.
+- Output Safety Latch is explicitly armed and reports ready.
+- Normal heater output is build-enabled for this deliberate test; the probe API cannot drive it.
 - Unlock Level L2 in [SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md) is satisfied.
 
-Suggested first heater pulse, only under supervision:
+Suggested first controlled test, only under supervision:
 
 ```txt
-heater pulse: 100-300 ms
+normal PID target: 30-35 C, with independent cutoff and thermometer
 ```
 
 Stop if PTC temperature jumps unexpectedly or fan behavior is wrong.
@@ -233,7 +268,7 @@ Before any normal heating:
 - Safety score acceptable.
 - Unlock Level L3 in [SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md) is satisfied.
 
-Only after this should normal heater output be considered:
+Only after this should normal heater output be considered for deliberate DIY or research hardware:
 
 ```txt
 CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y

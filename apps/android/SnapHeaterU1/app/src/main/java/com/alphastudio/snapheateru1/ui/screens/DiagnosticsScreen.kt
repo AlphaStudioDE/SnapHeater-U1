@@ -45,6 +45,13 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 StatusRow(stringResource(R.string.diagnostics_ble_state), snapshot.ble)
                 StatusRow(stringResource(R.string.diagnostics_service), SnapHeaterBleContract.ServiceUuid.toString().take(13) + "...")
                 StatusRow(stringResource(R.string.diagnostics_firmware), snapshot.firmwareVersion)
+                StatusRow(stringResource(R.string.diagnostics_control_owner), snapshot.controlOwner)
+                StatusRow(stringResource(R.string.diagnostics_control_revision), snapshot.controlStateRevision.toString())
+                StatusRow(
+                    stringResource(R.string.diagnostics_control_lease),
+                    if (snapshot.controlLeaseRemainingMs > 0) "${snapshot.controlLeaseRemainingMs / 1000}s" else stringResource(R.string.common_clear),
+                    valueColor = if (snapshot.controlLeaseRemainingMs > 0) StatusColors.Good else StatusColors.Warning,
+                )
                 StatusRow(stringResource(R.string.dashboard_heater_build), if (snapshot.heaterOutputBuildEnabled) stringResource(R.string.value_enabled) else stringResource(R.string.value_disabled), valueColor = if (snapshot.heaterOutputBuildEnabled) StatusColors.Warning else StatusColors.Good)
                 StatusRow(stringResource(R.string.dashboard_moonraker), snapshot.moonraker, valueColor = StatusColors.Warning)
             }
@@ -77,11 +84,15 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
                 Text(stringResource(R.string.diagnostics_fan_timing), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                StatusRow(stringResource(R.string.diagnostics_driver), if (snapshot.fanTriacControl) "Phase-angle / zero-cross" else "Plain GPIO", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
-                StatusRow(stringResource(R.string.diagnostics_mains), "${snapshot.acMainsHz} Hz")
-                StatusRow(stringResource(R.string.diagnostics_run_power), "${snapshot.fanTriacRunPercent}%")
-                StatusRow(stringResource(R.string.diagnostics_min_delay), "${snapshot.fanTriacMinDelayUs} us")
-                StatusRow(stringResource(R.string.diagnostics_gate_pulse), "${snapshot.fanTriacGatePulseUs} us")
+                StatusRow(stringResource(R.string.diagnostics_driver), if (snapshot.fanTriacControl) "Held-gate ON/OFF / zero-cross" else "Locked OFF", valueColor = if (snapshot.fanTriacControl) StatusColors.Good else StatusColors.Warning)
+                StatusRow(
+                    stringResource(R.string.diagnostics_zero_cross_signal),
+                    if (snapshot.zeroCrossSignalPresent) stringResource(R.string.common_present) else stringResource(R.string.common_missing),
+                    valueColor = if (snapshot.zeroCrossSignalPresent) StatusColors.Good else StatusColors.Warning,
+                )
+                StatusRow(stringResource(R.string.diagnostics_zero_cross_rate), "${snapshot.zeroCrossEdgesPerSec} /s")
+                StatusRow(stringResource(R.string.diagnostics_zero_cross_period), "${snapshot.zeroCrossLastPeriodUs} us")
+                StatusRow(stringResource(R.string.diagnostics_zero_cross_edges), snapshot.zeroCrossEdges.toString())
             }
         }
 
@@ -94,7 +105,7 @@ fun DiagnosticsScreen(snapshot: HeaterSnapshot) {
                 modifier = Modifier.fillMaxWidth().padding(14.dp),
             ) {
                 Text(stringResource(R.string.diagnostics_event_log), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                LogLine("00:01", "App started in mock repository mode")
+                LogLine("00:01", "Status source: ${snapshot.ble}")
                 LogLine("00:03", "Hardware map loaded: ${snapshot.hardwareMapName}")
                 LogLine("00:05", "TRIAC fan: GPIO${snapshot.fanGpio} gate, GPIO${snapshot.zeroCrossGpio} zero-cross")
                 LogLine("00:08", "Heater build enabled: ${snapshot.heaterOutputBuildEnabled}")

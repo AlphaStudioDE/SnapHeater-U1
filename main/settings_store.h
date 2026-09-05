@@ -26,6 +26,11 @@ esp_err_t shu1_settings_store_save_settings(const shu1_settings_t *settings);
 esp_err_t shu1_settings_store_load_device_config(shu1_device_config_t *cfg);
 esp_err_t shu1_settings_store_save_device_config(const shu1_device_config_t *cfg);
 esp_err_t shu1_settings_store_factory_reset(void);
+// Caller holds policy guard and reserves cold/idle maintenance.
+esp_err_t shu1_settings_store_set_control_token(const char *token);
+// One-shot, non-destructive import from the stock/DragonBreath app_nvs keys.
+// Existing SnapHeater configuration always wins.
+esp_err_t shu1_settings_store_import_stock_config_if_empty(void);
 
 #ifdef __cplusplus
 }

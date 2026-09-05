@@ -38,6 +38,12 @@ typedef enum {
     SHU1_HEATER_HEALTH_TEST_COMPLETE = 11,
     SHU1_HEATER_HEALTH_TEST_FAILED = 12,
     SHU1_HEATER_DOOR_OPEN = 13,
+    SHU1_HEATER_PERSISTED_FAULT = 14,
+    SHU1_HEATER_NVS_UNREADABLE = 15,
+    SHU1_HEATER_PANIC_OFF = 16,
+    SHU1_HEATER_LINK_LOST = 17,
+    SHU1_HEATER_ZERO_CROSS_LOST = 18,
+    SHU1_HEATER_FAULT_COUNT,
 } shu1_heater_fault_t;
 
 typedef enum {
@@ -112,8 +118,10 @@ typedef struct {
     int64_t session_started_ms;
     bool session_timeout_pending;
 
-    // Fan/cooldown policy. Fan remains on after heater turns off for this many minutes.
+    // Legacy SnapHeater setting retained for API/storage compatibility; the
+    // hardware cooldown decision uses DragonBreath's sensor-gated threshold.
     int fan_postrun_min;
+    int cool_release_c;
 
     // Print-finish tempering: optional user/app scenario after AUTO print completion.
     // Android enables it and chooses a duration. Firmware ramps chamber target
@@ -232,9 +240,6 @@ typedef struct {
     bool local_recipes_enabled;
     int active_recipe_slot;
     char active_recipe_name[32];
-    bool demo_mode_enabled;
-    int demo_phase;
-    int64_t demo_started_ms;
     bool safety_score_enabled;
     int safety_score;
     bool setup_validation_passed;
@@ -297,12 +302,18 @@ typedef struct {
 typedef struct {
     float chamber_temp_c;
     float ptc_temp_c;
+    float chamber_instant_temp_c;
+    float ptc_instant_temp_c;
     int chamber_raw;
     int ptc_raw;
     shu1_sensor_status_t chamber_sensor_status;
     shu1_sensor_status_t ptc_sensor_status;
     bool heater_requested;
     bool heater_output_on;
+    float heater_commanded_duty;
+    float heater_approach_limit;
+    int heater_effective_target_c;
+    char heater_constraint[24];
     bool fan_output_on;
     shu1_heater_fault_t heater_fault;
     int64_t last_sensor_ms;
@@ -365,6 +376,15 @@ typedef struct {
     bool output_safety_latch_ready;
     char symbiont_status[192];
 
+    uint64_t zero_cross_edges;
+    uint64_t zero_cross_rejected_edges;
+    uint32_t zero_cross_edges_per_sec;
+    uint32_t zero_cross_last_period_us;
+    uint32_t zero_cross_min_period_us;
+    uint32_t zero_cross_max_period_us;
+    int64_t zero_cross_last_edge_ms;
+    bool zero_cross_signal_present;
+
     char material_advice[160];
     char material_mismatch_message[192];
 
@@ -379,10 +399,31 @@ typedef struct {
     shu1_printer_state_t printer;
 } shu1_state_t;
 
+// Lock order: policy -> state / lease / latch. No network I/O while held.
+typedef struct { bool held; } shu1_control_guard_t;
+shu1_control_guard_t shu1_control_guard_begin(void);
+void shu1_control_guard_end(shu1_control_guard_t *guard);
+#define SHU1_CONTROL_GUARD(name) \
+    shu1_control_guard_t name __attribute__((cleanup(shu1_control_guard_end))) = shu1_control_guard_begin()
+bool shu1_control_maintenance_active(void);
+bool shu1_control_start_allowed(void);
+bool shu1_control_outputs_busy(void);
+bool shu1_control_schedule_allowed(void);
+bool shu1_control_maintenance_begin(void);
+void shu1_control_maintenance_end(void);
+void shu1_settings_stop(shu1_settings_t *settings);
 void shu1_state_init(void);
 SemaphoreHandle_t shu1_state_mutex(void);
 void shu1_state_get(shu1_state_t *out);
+void shu1_settings_limit_targets(shu1_settings_t *settings);
 void shu1_state_update_settings(const shu1_settings_t *settings);
+// External command update. Advances a monotonic epoch used by the sole output
+// task to reject a policy snapshot that became stale before actuator apply.
+void shu1_state_update_settings_command(const shu1_settings_t *settings);
+uint32_t shu1_state_command_epoch(void);
+bool shu1_state_commit_control_if_epoch(const shu1_settings_t *settings,
+                                        const shu1_runtime_t *runtime,
+                                        uint32_t expected_epoch);
 void shu1_state_update_runtime(const shu1_runtime_t *runtime);
 void shu1_state_update_printer(const shu1_printer_state_t *printer);
 shu1_settings_t shu1_state_get_settings(void);

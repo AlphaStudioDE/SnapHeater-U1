@@ -5,6 +5,7 @@
  */
 
 #include "moonraker_client.h"
+#include "ws_message_buffer.h"
 #include "app_config.h"
 #include "app_state.h"
 #include "settings_store.h"
@@ -27,6 +28,7 @@
 #include <strings.h>
 
 static const char *TAG = "shu1_moonraker";
+static shu1_ws_buffer_t g_rx;
 
 static esp_websocket_client_handle_t g_client = NULL;
 static shu1_device_config_t g_devcfg;
@@ -102,8 +104,10 @@ static void mark_online(bool online) {
     bool changed = (pr.moonraker_connected != online);
     pr.moonraker_connected = online;
     if (!online) {
+
         pr.subscribed = false;
         pr.klippy_ready = false;
+        pr.last_update_ms = 0;
     }
     shu1_state_update_printer(&pr);
     if (changed) {
@@ -464,6 +468,15 @@ static void parse_object_update(cJSON *objects) {
         }
     }
 
+    // Delta notifications and process statistics are not proof of fresh control data.
+    cJSON *ps_state = cJSON_GetObjectItem(ps, "state");
+    cJSON *bed_temp = cJSON_GetObjectItem(bed, "temperature");
+    cJSON *bed_target = cJSON_GetObjectItem(bed, "target");
+    cJSON *web_state = cJSON_GetObjectItem(webhooks, "state");
+    if (cJSON_IsString(ps_state) && cJSON_IsString(web_state) &&
+        cJSON_IsNumber(bed_temp) && isfinite(bed_temp->valuedouble) &&
+        cJSON_IsNumber(bed_target) && isfinite(bed_target->valuedouble))
+        pr.last_update_ms = now_ms();
     shu1_state_update_printer(&pr);
 }
 
@@ -548,6 +561,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED: {
+        memset(&g_rx, 0, sizeof(g_rx));
         ESP_LOGI(TAG, "Moonraker websocket connected");
         g_subscribe_pending = false;
         g_autodetect_pending = false;
@@ -557,6 +571,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
         mark_online(true);
         shu1_printer_state_t pr = shu1_state_get_printer();
         pr.last_ws_message_ms = now_ms();
+        pr.last_update_ms = 0;
         pr.subscribed = false;
         pr.klippy_ready = false;
         shu1_state_update_printer(&pr);
@@ -566,6 +581,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
         break;
     }
     case WEBSOCKET_EVENT_DISCONNECTED: {
+        memset(&g_rx, 0, sizeof(g_rx));
         ESP_LOGW(TAG, "Moonraker websocket disconnected");
         g_subscribe_pending = false;
         g_autodetect_pending = false;
@@ -573,8 +589,12 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
         break;
     }
     case WEBSOCKET_EVENT_DATA:
-        if (data && data->op_code == 0x1 && data->data_len > 0) {
-            parse_moonraker_message(data->data_ptr, data->data_len);
+        if (data) {
+            size_t complete_length;
+            if (shu1_ws_accumulate(&g_rx, data->op_code, data->fin, data->payload_len,
+                                   data->payload_offset, data->data_ptr, data->data_len,
+                                   &complete_length))
+                parse_moonraker_message(g_rx.bytes, (int)complete_length);
         }
         break;
     case WEBSOCKET_EVENT_ERROR:
@@ -598,6 +618,7 @@ static void moonraker_task(void *arg) {
     esp_websocket_client_config_t websocket_cfg = {
         .uri = uri,
         .network_timeout_ms = 5000,
+        .buffer_size = 4096,
         .reconnect_timeout_ms = SHU1_MOONRAKER_WS_RECONNECT_MS,
     };
     g_client = esp_websocket_client_init(&websocket_cfg);
@@ -636,6 +657,10 @@ static void moonraker_task(void *arg) {
             send_subscription(false);
         }
 
+        // Query the complete control subset, because subscriptions send only changes.
+        send_json("{\"jsonrpc\":\"2.0\",\"id\":103,\"method\":\"printer.objects.query\","
+                  "\"params\":{\"objects\":{\"print_stats\":[\"state\"],"
+                  "\"heater_bed\":[\"temperature\",\"target\"],\"webhooks\":[\"state\"]}}}");
         // Keep server.info flowing; it also gives us a lightweight liveness check.
         char ping[96];
         snprintf(ping, sizeof(ping), "{\"id\":%d,\"jsonrpc\":\"2.0\",\"method\":\"server.info\"}", g_rpc_id++);

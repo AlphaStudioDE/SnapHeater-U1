@@ -6,23 +6,32 @@ without safe bench testing.
 
 ## Accepted map
 
+Confidence follows DragonBreath's own documentation: GPIO3 fan and GPIO7
+zero-cross are confirmed; GPIO18 heater and GPIO0/GPIO1 NTC routing are inferred
+and require continuity confirmation on the target PCB before flashing.
+
 ```txt
 GPIO18 = PTC relay / heater output
 GPIO3  = fan TRIAC gate
-GPIO7  = zero-cross detector, shared with K1 behavior
-GPIO0  = chamber/warehouse NTC ADC, also shared with K2 button net
+GPIO7  = zero-cross detector
+GPIO0  = chamber/warehouse NTC ADC
 GPIO1  = PTC element NTC ADC
-GPIO2  = K3 button net
-GPIO6  = K1 button/backlight LED
-GPIO5  = K2 button/backlight LED
-GPIO4  = K3 button/backlight LED
+GPIO19 = 33k/82k NTC reference-resistor strap
+GPIO9  = Power button (strap, active low)
+GPIO8  = Auto button (strap, active low)
+GPIO10 = On button (active low)
+GPIO2  = Dry button (strap, active low)
+GPIO6  = Auto LED
+GPIO5  = On LED
+GPIO4  = Dry LED
 GPIO21 = UART0 TX through the CH340K USB bridge
 GPIO20 = UART0 RX through the CH340K USB bridge
 ```
 
-Button semantics are intentionally disabled by default. GPIO7 is reserved for
-zero-cross detection, and GPIO0/GPIO1 are sensor inputs. Do not turn those shared
-nets into generic buttons without a dedicated firmware change.
+Panel support is intentionally disabled in the public defaults. GPIO7 is
+reserved for zero-cross detection, and GPIO0/GPIO1 are sensor inputs. Power LED
+support is separately disabled because GPIO21 is also UART0 TX. Buttons on
+strapping GPIO9/GPIO8/GPIO2 are ignored when held at boot until released.
 
 ## Safe bring-up order
 
@@ -51,7 +60,7 @@ curl -X POST http://snapheater.local/api/probe \
   -d '{"output":"fan","duration_ms":1000}'
 ```
 
-Heater pulse:
+Heater probe command (expected to be rejected):
 
 ```bash
 curl -X POST http://snapheater.local/api/probe \
@@ -59,4 +68,5 @@ curl -X POST http://snapheater.local/api/probe \
   -d '{"output":"heater","duration_ms":200}'
 ```
 
-The heater pulse endpoint is intentionally short and compile-time locked. Use current limiting and an independent thermometer.
+First heating must use the normal PID path and every runtime safety governor,
+never a direct GPIO pulse.

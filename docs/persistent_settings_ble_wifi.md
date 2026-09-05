@@ -43,7 +43,7 @@ The config is saved to NVS. A reboot is recommended after changing Wi-Fi or Moon
 ## Factory reset
 
 ```json
-{"factory_reset":true}
+{"factory_reset":"factory-reset"}
 ```
 
 This erases the SnapHeater NVS namespace. The device will fall back to compile-time defaults after reboot.

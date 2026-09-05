@@ -14,7 +14,7 @@ import java.net.URL
 import org.json.JSONObject
 import org.json.JSONException
 
-class SnapHeaterApiClient(baseUrl: String) {
+class SnapHeaterApiClient(baseUrl: String, private val controlToken: String = "web") {
     private val rootUrl = normalizeBaseUrl(baseUrl)
 
     fun health(): JSONObject = request("GET", "/api/health")
@@ -23,6 +23,9 @@ class SnapHeaterApiClient(baseUrl: String) {
 
     fun postSettings(payload: JSONObject): JSONObject = request("POST", "/api/settings", payload)
 
+    fun heartbeat(leaseId: String): JSONObject =
+        request("POST", "/api/v2/heartbeat", JSONObject().put("lease_id", leaseId))
+
     private fun request(method: String, path: String, body: JSONObject? = null): JSONObject {
         val connection = try {
             (URL("$rootUrl$path").openConnection() as HttpURLConnection).apply {
@@ -30,6 +33,7 @@ class SnapHeaterApiClient(baseUrl: String) {
                 connectTimeout = 3000
                 readTimeout = 5000
                 setRequestProperty("Accept", "application/json")
+                if (method != "GET") setRequestProperty("X-DragonBreath-Auth", controlToken)
                 if (body != null) {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")

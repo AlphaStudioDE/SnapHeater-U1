@@ -2,16 +2,21 @@
 
 SnapHeater U1 treats chamber heating as a hazardous function.
 
+> Current target: SnapHeater firmware on original Panda Breath V1.0/V1.0.1
+> electronics, using the DragonBreath-derived hardware layer. This is not the
+> AirGuard 300 target.
+
 ## Firmware safety layers
 
-1. Normal heater output build-enabled for the accepted Panda Breath map.
-2. Diagnostic probe API disabled by default at build time.
+1. Normal heater and fan control are build-disabled by default; verified pins remain mapped.
+2. Diagnostic probe commands are rejected; no secondary GPIO writer is admitted.
 3. Runtime safety checks and the Output Safety Latch guard physical heating.
 4. Sensor fault stops heater request.
 5. Chamber overtemperature stops heater request.
-6. PTC local overtemperature stops heater request.
-7. Fan runs during heating and during fault cooldown.
-8. Chamber target is clamped by `CONFIG_SHU1_MAX_TARGET_TEMP_C`, default 60 C.
+6. PTC local overtemperature has a 105 C hard cutoff plus 33k/82k board foldback.
+7. Fan ON is applied at a validated zero-cross, OFF is immediate, and the heater
+   cannot energize until the fan is confirmed running.
+8. Runtime policy caps the chamber target at 55 C, even if the configuration ceiling is higher.
 9. Drying mode has a timer.
 10. Heater abnormal/no-rise detector turns heater off if no temperature rise is observed.
 
@@ -43,7 +48,10 @@ minimum PTC rise: 5 C
 minimum chamber rise: 1 C
 ```
 
-These values are conservative development placeholders and must be tuned on real hardware.
+These no-rise values remain SnapHeater policy; DragonBreath does not provide an
+equivalent validated no-rise detector. They are intentionally additional to,
+not replacements for, the DragonBreath-derived 85 C chamber cutoff, 105 C PTC
+cutoff and board-specific PTC foldback thresholds.
 
 ## Hardware safety still required
 
@@ -59,12 +67,13 @@ Firmware must not be the only safety layer. Use:
 
 ## First power-up recommendation
 
-1. Flash with `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y` only for the accepted Panda Breath map.
+1. Back up and verify the original 4 MB flash before installing SnapHeater.
 2. Read `/api/status` and confirm ADC values move with temperature.
-3. Open device and confirm output behavior with safe bench measurements.
-4. Optionally compile a separate probe build with `CONFIG_SHU1_ENABLE_GPIO_PROBE=y`.
-5. Test fan pulse first.
-6. Test heater pulse only with supervision, current limiting and independent thermometer.
-7. Enable normal heater output only after confirming fan behavior, polarity and sensors.
+3. Confirm the exact PCB revision and DragonBreath GPIO map before output testing.
+4. Do not use the legacy probe API; diagnostic pulses are rejected.
+5. Test the held-gate fan path first; never use PWM or phase-angle pulses.
+6. Test the heater only through the guarded normal output path, under supervision,
+   with current limiting and an independent thermometer.
+7. Enable normal heater output only for deliberate research after confirming fan behavior, polarity and sensors.
 
 For a stricter staged procedure, see [SAFETY_UNLOCK_PROCEDURE.md](SAFETY_UNLOCK_PROCEDURE.md).

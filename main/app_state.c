@@ -6,6 +6,9 @@
 
 #include "app_state.h"
 #include "app_config.h"
+#include "control_lease.h"
+#include "safety_latch.h"
+#include "fan_triac.h"
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
@@ -13,9 +16,77 @@
 
 static shu1_state_t g_state;
 static SemaphoreHandle_t g_state_mutex;
+static uint32_t g_command_epoch;
+static SemaphoreHandle_t g_policy_mutex;
+static bool g_maintenance;
+
+shu1_control_guard_t shu1_control_guard_begin(void) {
+    configASSERT(g_policy_mutex);
+    xSemaphoreTake(g_policy_mutex, portMAX_DELAY);
+    return (shu1_control_guard_t){ .held = true };
+}
+void shu1_control_guard_end(shu1_control_guard_t *guard) {
+    if (guard && guard->held) {
+        guard->held = false;
+        xSemaphoreGive(g_policy_mutex);
+    }
+}
+// Maintenance access requires the policy guard.
+bool shu1_control_maintenance_active(void) { return g_maintenance; }
+bool shu1_control_outputs_busy(void) {
+    xSemaphoreTake(g_state_mutex, portMAX_DELAY);
+    bool busy = g_state.runtime.heater_output_on || g_state.runtime.fan_output_on;
+    xSemaphoreGive(g_state_mutex);
+    return busy || shu1_fan_triac_is_active();
+}
+bool shu1_control_start_allowed(void) {
+    return !g_maintenance && !shu1_safety_latch_is_set() &&
+           !shu1_safety_latch_is_inhibited();
+}
+bool shu1_control_schedule_allowed(void) {
+    shu1_control_snapshot_t owner;
+    shu1_control_snapshot(&owner);
+    return shu1_control_start_allowed() && owner.lease_active &&
+           !shu1_control_lease_expired();
+}
+bool shu1_control_maintenance_begin(void) {
+    shu1_settings_t st = shu1_state_get_settings();
+    if (g_maintenance || st.work_on || st.scheduled_preheat_enabled ||
+        st.preheat_running || st.drying_running || st.dryout_running ||
+        st.health_test_running || st.keep_warm_active || st.pickup_active ||
+        shu1_control_outputs_busy() || shu1_safety_latch_is_set()) return false;
+    shu1_runtime_t rt = shu1_state_get_runtime();
+    int64_t age = esp_timer_get_time() / 1000 - rt.last_sensor_ms;
+    if (rt.last_sensor_ms <= 0 || age < 0 || age > 1500 ||
+        rt.chamber_sensor_status != SHU1_SENSOR_OK || rt.ptc_sensor_status != SHU1_SENSOR_OK ||
+        !isfinite(rt.chamber_instant_temp_c) || !isfinite(rt.ptc_instant_temp_c) ||
+        rt.chamber_instant_temp_c >= 30.0f || rt.ptc_instant_temp_c >= 30.0f)
+        return false;
+    g_maintenance = true;
+    return true;
+}
+void shu1_control_maintenance_end(void) { g_maintenance = false; }
+void shu1_settings_stop(shu1_settings_t *st) {
+    st->work_on = false;
+    st->output_safety_latch_armed = false;
+    st->drying_running = false; st->drying_end_ms = 0;
+    st->preheat_running = false; st->preheat_end_ms = 0;
+    st->preheat_phase = SHU1_PREHEAT_IDLE; st->preheat_hold_start_ms = 0;
+    st->dryout_running = false; st->dryout_end_ms = 0;
+    st->health_test_running = false; st->health_test_phase = SHU1_HEALTH_IDLE;
+    st->scheduled_preheat_enabled = false; st->scheduled_preheat_start_ms = 0;
+    st->keep_warm_active = false; st->keep_warm_end_ms = 0;
+    st->pickup_active = false; st->resume_recover_active = false;
+    st->tempering_phase = SHU1_TEMPERING_IDLE;
+    st->tempering_start_ms = 0; st->tempering_end_ms = 0;
+    st->heat_soak_phase = SHU1_HEAT_SOAK_IDLE;
+    st->session_started_ms = 0;
+}
 
 void shu1_state_init(void) {
+    g_policy_mutex = xSemaphoreCreateMutex();
     g_state_mutex = xSemaphoreCreateMutex();
+    configASSERT(g_policy_mutex && g_state_mutex);
     memset(&g_state, 0, sizeof(g_state));
     g_state.settings.work_on = false;
     g_state.settings.work_mode = SHU1_MODE_AUTO;
@@ -38,6 +109,7 @@ void shu1_state_init(void) {
     g_state.settings.session_started_ms = 0;
     g_state.settings.session_timeout_pending = false;
     g_state.settings.fan_postrun_min = SHU1_DEFAULT_FAN_POSTRUN_MIN;
+    g_state.settings.cool_release_c = 40;
     g_state.settings.tempering_enabled = SHU1_DEFAULT_TEMPERING_ENABLED;
     g_state.settings.tempering_end_temp_c = SHU1_DEFAULT_TEMPERING_END_TEMP_C;
     g_state.settings.tempering_duration_min = SHU1_DEFAULT_TEMPERING_DURATION_MIN;
@@ -135,9 +207,6 @@ void shu1_state_init(void) {
     g_state.settings.local_recipes_enabled = true;
     g_state.settings.active_recipe_slot = 0;
     snprintf(g_state.settings.active_recipe_name, sizeof(g_state.settings.active_recipe_name), "%s", "Default");
-    g_state.settings.demo_mode_enabled = false;
-    g_state.settings.demo_phase = SHU1_DEMO_IDLE;
-    g_state.settings.demo_started_ms = 0;
     g_state.settings.safety_score_enabled = true;
     g_state.settings.safety_score = 0;
     g_state.settings.setup_validation_passed = false;
@@ -161,7 +230,7 @@ void shu1_state_init(void) {
     g_state.settings.language_code = SHU1_LANG_EN;
     g_state.settings.local_only_mode = SHU1_DEFAULT_LOCAL_ONLY_MODE;
     g_state.settings.ota_enabled = false;
-    g_state.settings.ota_rollback_placeholder_enabled = true;
+    g_state.settings.ota_rollback_placeholder_enabled = false;
     g_state.settings.ota_status = SHU1_OTA_IDLE;
     g_state.settings.contest_showcase_mode_enabled = false;
     g_state.settings.symbiont_mode_enabled = false;
@@ -179,6 +248,10 @@ void shu1_state_init(void) {
     g_state.settings.health_test_start_ptc_c = NAN;
     g_state.settings.health_test_start_chamber_c = NAN;
     g_state.settings.health_test_complete_pending = false;
+    g_state.runtime.chamber_temp_c = NAN;
+    g_state.runtime.ptc_temp_c = NAN;
+    g_state.runtime.chamber_instant_temp_c = NAN;
+    g_state.runtime.ptc_instant_temp_c = NAN;
     g_state.runtime.stability_min_c = NAN;
     g_state.runtime.stability_max_c = NAN;
     g_state.runtime.warmup_eta_sec = -1;
@@ -211,6 +284,13 @@ void shu1_state_init(void) {
     strcpy(g_state.runtime.incident_summary, "No incident report captured");
     g_state.runtime.output_safety_latch_ready = false;
     strcpy(g_state.runtime.symbiont_status, "U1 Symbiont Mode disabled; Moonraker read-only observation active");
+    g_state.runtime.zero_cross_edges = 0;
+    g_state.runtime.zero_cross_edges_per_sec = 0;
+    g_state.runtime.zero_cross_last_period_us = 0;
+    g_state.runtime.zero_cross_min_period_us = 0;
+    g_state.runtime.zero_cross_max_period_us = 0;
+    g_state.runtime.zero_cross_last_edge_ms = 0;
+    g_state.runtime.zero_cross_signal_present = false;
 
     strcpy(g_state.runtime.material_advice, "No material advice yet");
     strcpy(g_state.runtime.material_mismatch_message, "No material/profile mismatch");
@@ -268,11 +348,68 @@ shu1_printer_state_t shu1_state_get_printer(void) {
     return v;
 }
 
+void shu1_settings_limit_targets(shu1_settings_t *s) {
+    if (!s) return;
+    int maximum = CONFIG_SHU1_MAX_TARGET_TEMP_C < SHU1_VALIDATION_MAX_TARGET_C
+        ? CONFIG_SHU1_MAX_TARGET_TEMP_C : SHU1_VALIDATION_MAX_TARGET_C;
+    if (s->target_temp_c > maximum) s->target_temp_c = maximum;
+    if (s->target_temp_c < 0) s->target_temp_c = 0;
+    if (s->custom_temp_c > maximum) s->custom_temp_c = maximum;
+    if (s->custom_temp_c < 0) s->custom_temp_c = 0;
+    if (s->preheat_target_temp_c > maximum) s->preheat_target_temp_c = maximum;
+    if (s->preheat_target_temp_c < 0) s->preheat_target_temp_c = 0;
+    if (s->scheduled_preheat_target_c > maximum) s->scheduled_preheat_target_c = maximum;
+    if (s->scheduled_preheat_target_c < 0) s->scheduled_preheat_target_c = 0;
+    if (s->dryout_target_temp_c > maximum) s->dryout_target_temp_c = maximum;
+    if (s->dryout_target_temp_c < 0) s->dryout_target_temp_c = 0;
+    if (s->health_test_target_c > maximum) s->health_test_target_c = maximum;
+    if (s->health_test_target_c < 0) s->health_test_target_c = 0;
+    if (s->tempering_end_temp_c > maximum) s->tempering_end_temp_c = maximum;
+    if (s->tempering_end_temp_c < 0) s->tempering_end_temp_c = 0;
+    if (s->tempering_current_target_c > maximum) s->tempering_current_target_c = maximum;
+    if (s->tempering_current_target_c < 0) s->tempering_current_target_c = 0;
+    if (s->keep_warm_temp_c > maximum) s->keep_warm_temp_c = maximum;
+    if (s->keep_warm_temp_c < 0) s->keep_warm_temp_c = 0;
+}
+
 void shu1_state_update_settings(const shu1_settings_t *settings) {
     if (!settings) return;
     xSemaphoreTake(g_state_mutex, portMAX_DELAY);
     g_state.settings = *settings;
+    shu1_settings_limit_targets(&g_state.settings);
     xSemaphoreGive(g_state_mutex);
+}
+
+void shu1_state_update_settings_command(const shu1_settings_t *settings) {
+    if (!settings) return;
+    xSemaphoreTake(g_state_mutex, portMAX_DELAY);
+    g_state.settings = *settings;
+    shu1_settings_limit_targets(&g_state.settings);
+    ++g_command_epoch;
+    if (g_command_epoch == 0) ++g_command_epoch;
+    xSemaphoreGive(g_state_mutex);
+}
+
+uint32_t shu1_state_command_epoch(void) {
+    xSemaphoreTake(g_state_mutex, portMAX_DELAY);
+    uint32_t value = g_command_epoch;
+    xSemaphoreGive(g_state_mutex);
+    return value;
+}
+
+bool shu1_state_commit_control_if_epoch(const shu1_settings_t *settings,
+                                        const shu1_runtime_t *runtime,
+                                        uint32_t expected_epoch) {
+    if (!settings || !runtime) return false;
+    xSemaphoreTake(g_state_mutex, portMAX_DELAY);
+    const bool current = g_command_epoch == expected_epoch;
+    if (current) {
+        g_state.settings = *settings;
+        shu1_settings_limit_targets(&g_state.settings);
+        g_state.runtime = *runtime;
+    }
+    xSemaphoreGive(g_state_mutex);
+    return current;
 }
 
 void shu1_state_update_runtime(const shu1_runtime_t *runtime) {
@@ -286,7 +423,7 @@ void shu1_state_update_printer(const shu1_printer_state_t *printer) {
     if (!printer) return;
     xSemaphoreTake(g_state_mutex, portMAX_DELAY);
     g_state.printer = *printer;
-    g_state.printer.last_update_ms = esp_timer_get_time() / 1000;
+    // Only a complete Moonraker control snapshot renews validity.
     xSemaphoreGive(g_state_mutex);
 }
 
@@ -316,6 +453,11 @@ const char *shu1_heater_fault_str(shu1_heater_fault_t fault) {
     case SHU1_HEATER_HEALTH_TEST_COMPLETE: return "health_test_complete";
     case SHU1_HEATER_HEALTH_TEST_FAILED: return "health_test_failed";
     case SHU1_HEATER_DOOR_OPEN: return "door_open";
+    case SHU1_HEATER_PERSISTED_FAULT: return "persisted_fault";
+    case SHU1_HEATER_NVS_UNREADABLE: return "fault_store_unreadable";
+    case SHU1_HEATER_PANIC_OFF: return "panic_off";
+    case SHU1_HEATER_LINK_LOST: return "controller_link_lost";
+    case SHU1_HEATER_ZERO_CROSS_LOST: return "zero_cross_lost";
     default: return "unknown";
     }
 }

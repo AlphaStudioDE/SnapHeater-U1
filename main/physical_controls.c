@@ -6,12 +6,18 @@
 
 #include "physical_controls.h"
 #include "app_config.h"
+#include "settings_store.h"
 #include "app_state.h"
 #include "heater.h"
+#include "safety.h"
+#include "safety_latch.h"
 #include "event_log.h"
+#include "control_lease.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -19,11 +25,13 @@
 
 static const char *TAG = "shu1_phys";
 
+#if CONFIG_SHU1_ENABLE_PHYSICAL_CONTROLS
 typedef struct {
     const char *name;
     int id;
     int gpio;
     bool enabled;
+    bool ignore_until_released;
     bool stable_pressed;
     bool raw_pressed_last;
     bool long_fired;
@@ -32,11 +40,13 @@ typedef struct {
 } shu1_button_t;
 
 static shu1_button_t g_buttons[] = {
-    {"auto", SHU1_PHYS_BTN_AUTO, CONFIG_SHU1_BUTTON_AUTO_GPIO, false, false, false, false, 0, 0},
-    {"on", SHU1_PHYS_BTN_ON, CONFIG_SHU1_BUTTON_ON_GPIO, false, false, false, false, 0, 0},
-    {"off", SHU1_PHYS_BTN_OFF, CONFIG_SHU1_BUTTON_OFF_GPIO, false, false, false, false, 0, 0},
-    {"generic", SHU1_PHYS_BTN_GENERIC, CONFIG_SHU1_BUTTON_GENERIC_GPIO, false, false, false, false, 0, 0},
+    {.name="power", .id=SHU1_PHYS_BTN_POWER, .gpio=CONFIG_SHU1_BUTTON_POWER_GPIO},
+    {.name="auto",  .id=SHU1_PHYS_BTN_AUTO,  .gpio=CONFIG_SHU1_BUTTON_AUTO_GPIO},
+    {.name="on",    .id=SHU1_PHYS_BTN_ON,    .gpio=CONFIG_SHU1_BUTTON_ON_GPIO},
+    {.name="dry",   .id=SHU1_PHYS_BTN_DRY,   .gpio=CONFIG_SHU1_BUTTON_DRY_GPIO},
 };
+static bool g_reset_combo_active;
+static int64_t g_reset_combo_started_ms;
 
 static bool valid_gpio(int gpio) {
     return gpio >= 0 && gpio <= 21; // ESP32-C3 module/package dependent. Verify on real PCB.
@@ -107,9 +117,11 @@ static void stop_all_user_cycles(bool emergency) {
     st.heat_soak_phase = SHU1_HEAT_SOAK_IDLE;
     st.health_test_phase = SHU1_HEALTH_IDLE;
     st.session_started_ms = 0;
-    shu1_state_update_settings(&st);
+    if (emergency) st.output_safety_latch_armed = false;
+    shu1_state_update_settings_command(&st);
+    shu1_safety_wake();
     if (emergency) {
-        shu1_heater_force_off();
+        shu1_safety_wake();
         set_notification(SHU1_NOTIFY_ACTION, "physical_emergency_off", "Physical long-press OFF: heater and fan forced off");
         shu1_event_log_add("warn", "physical_emergency_off", "physical OFF long press forced all outputs off");
     } else {
@@ -120,6 +132,7 @@ static void stop_all_user_cycles(bool emergency) {
 }
 
 static bool output_latch_allows_start(void) {
+    if (!shu1_control_start_allowed()) return false;
     shu1_settings_t st = shu1_state_get_settings();
     shu1_runtime_t rt = shu1_state_get_runtime();
     if (!st.output_safety_latch_enabled) return true;
@@ -131,22 +144,53 @@ static bool output_latch_allows_start(void) {
 
 static void start_auto_mode(void) {
     if (!output_latch_allows_start()) return;
+    (void)shu1_control_claim(SHU1_CONTROL_PHYSICAL, true,
+                             SHU1_CONTROL_REVISION_ANY, NULL);
     shu1_settings_t st = shu1_state_get_settings();
+    st.scheduled_preheat_enabled = false;
+    st.scheduled_preheat_start_ms = 0;
     st.work_mode = SHU1_MODE_AUTO;
     st.work_on = true;
     if (st.session_started_ms == 0) st.session_started_ms = esp_timer_get_time() / 1000;
-    shu1_state_update_settings(&st);
+    shu1_state_update_settings_command(&st);
+    shu1_safety_wake();
     set_notification(SHU1_NOTIFY_INFO, "physical_auto", "Physical AUTO: Auto/Symbiont-aware mode requested");
     shu1_event_log_add("info", "physical_auto", "physical AUTO button requested auto mode");
 }
 
+static void start_dry_mode(void) {
+    if (!output_latch_allows_start()) return;
+    (void)shu1_control_claim(SHU1_CONTROL_PHYSICAL, true,
+                             SHU1_CONTROL_REVISION_ANY, NULL);
+    shu1_settings_t st = shu1_state_get_settings();
+    st.scheduled_preheat_enabled = false;
+    st.scheduled_preheat_start_ms = 0;
+    st.work_mode = SHU1_MODE_DRYING;
+    st.drying_running = true;
+    int hours = st.drying_mode == SHU1_DRYING_CUSTOM ? st.custom_timer_h : 12;
+    if (hours < 1) hours = 1;
+    if (hours > 12) hours = 12;
+    st.drying_end_ms = esp_timer_get_time() / 1000 + (int64_t)hours * 3600000;
+    st.work_on = true;
+    if (st.session_started_ms == 0) st.session_started_ms = esp_timer_get_time() / 1000;
+    shu1_state_update_settings_command(&st);
+    shu1_safety_wake();
+    set_notification(SHU1_NOTIFY_INFO, "physical_dry", "Physical DRY: filament drying requested");
+    shu1_event_log_add("info", "physical_dry", "physical DRY button requested drying mode");
+}
+
 static void start_manual_mode(void) {
     if (!output_latch_allows_start()) return;
+    (void)shu1_control_claim(SHU1_CONTROL_PHYSICAL, true,
+                             SHU1_CONTROL_REVISION_ANY, NULL);
     shu1_settings_t st = shu1_state_get_settings();
+    st.scheduled_preheat_enabled = false;
+    st.scheduled_preheat_start_ms = 0;
     st.work_mode = SHU1_MODE_POWER_ON;
     st.work_on = true;
     if (st.session_started_ms == 0) st.session_started_ms = esp_timer_get_time() / 1000;
-    shu1_state_update_settings(&st);
+    shu1_state_update_settings_command(&st);
+    shu1_safety_wake();
     set_notification(SHU1_NOTIFY_INFO, "physical_manual", "Physical ON: manual chamber hold requested");
     shu1_event_log_add("info", "physical_manual", "physical ON button requested manual chamber hold");
 }
@@ -171,65 +215,70 @@ static void acknowledge_notifications(void) {
     st.setup_warning_pending = false;
     st.incident_report_pending = false;
     st.symbiont_notification_pending = false;
-    shu1_state_update_settings(&st);
+    shu1_state_update_settings_command(&st);
+    shu1_safety_wake();
     set_notification(SHU1_NOTIFY_INFO, "physical_ack", "Physical button acknowledged pending notifications");
     shu1_event_log_add("info", "physical_ack", "physical generic button acknowledged warnings/completions");
 }
 
 static void handle_button_event(shu1_button_t *btn, bool long_press) {
     if (!btn) return;
+    SHU1_CONTROL_GUARD(policy_guard);
     ESP_LOGI(TAG, "button %s %s", btn->name, long_press ? "long" : "short");
+    shu1_runtime_t rt = shu1_state_get_runtime();
+    rt.physical_last_button = btn->id;
+    shu1_state_update_runtime(&rt);
+    // Any physical action wins over a remote lease. OFF remains unconditional;
+    // a following local start claims a fresh physical session below.
+    shu1_control_release_any();
+
+    if (long_press) {
+        bool was_latched = shu1_safety_latch_is_set();
+        stop_all_user_cycles(true);
+        if (btn->id == SHU1_PHYS_BTN_POWER && was_latched) {
+            shu1_safety_latch_request_clear();
+            set_notification(SHU1_NOTIFY_ACTION, "physical_fault_clear_requested",
+                             "Power long press requested a safe persistent-fault clear");
+        } else {
+            shu1_safety_latch_trip_volatile(SHU1_HEATER_PANIC_OFF);
+            set_notification(SHU1_NOTIFY_ACTION, "physical_panic_latched",
+                             "Physical long press latched per-boot panic-off; explicit safe clear required");
+        }
+        return;
+    }
+
     switch (btn->id) {
+        case SHU1_PHYS_BTN_POWER: {
+            shu1_settings_t st = shu1_state_get_settings();
+            if (st.work_on) stop_all_user_cycles(false);
+            else if (st.work_mode == SHU1_MODE_AUTO) start_auto_mode();
+            else if (st.work_mode == SHU1_MODE_DRYING) start_dry_mode();
+            else start_manual_mode();
+            break;
+        }
         case SHU1_PHYS_BTN_AUTO:
-            if (long_press) {
-                shu1_settings_t st = shu1_state_get_settings();
-                st.symbiont_mode_enabled = !st.symbiont_mode_enabled;
-                st.symbiont_notification_pending = true;
-                shu1_state_update_settings(&st);
-                set_notification(SHU1_NOTIFY_INFO, "physical_symbiont_toggle", st.symbiont_mode_enabled ? "U1 Symbiont Mode enabled from physical AUTO long press" : "U1 Symbiont Mode disabled from physical AUTO long press");
-                shu1_event_log_add("info", "physical_symbiont_toggle", "physical AUTO long press toggled U1 Symbiont Mode");
-            } else {
-                start_auto_mode();
-            }
+            if (shu1_state_get_settings().work_on &&
+                shu1_state_get_settings().work_mode == SHU1_MODE_AUTO) stop_all_user_cycles(false);
+            else start_auto_mode();
             break;
         case SHU1_PHYS_BTN_ON:
-            if (long_press) {
-                shu1_settings_t st = shu1_state_get_settings();
-                st.preheat_running = true;
-                st.preheat_target_temp_c = st.target_temp_c;
-                st.preheat_hold_min = st.preheat_hold_min > 0 ? st.preheat_hold_min : 15;
-                st.preheat_phase = SHU1_PREHEAT_HEATING;
-                st.preheat_complete_pending = false;
-                st.work_mode = SHU1_MODE_PREHEAT;
-                st.work_on = true;
-                if (st.session_started_ms == 0) st.session_started_ms = esp_timer_get_time() / 1000;
-                shu1_state_update_settings(&st);
-                set_notification(SHU1_NOTIFY_INFO, "physical_preheat", "Physical ON long press: preheat/hold requested");
-                shu1_event_log_add("info", "physical_preheat", "physical ON long press requested preheat/hold");
-            } else {
-                start_manual_mode();
-            }
+            if (shu1_state_get_settings().work_on &&
+                shu1_state_get_settings().work_mode == SHU1_MODE_POWER_ON) stop_all_user_cycles(false);
+            else start_manual_mode();
             break;
-        case SHU1_PHYS_BTN_OFF:
-            stop_all_user_cycles(long_press);
+        case SHU1_PHYS_BTN_DRY:
+            if (shu1_state_get_settings().work_on &&
+                shu1_state_get_settings().work_mode == SHU1_MODE_DRYING) stop_all_user_cycles(false);
+            else start_dry_mode();
             break;
-        case SHU1_PHYS_BTN_GENERIC:
         default:
-            if (long_press) stop_all_user_cycles(true);
-            else acknowledge_notifications();
+            acknowledge_notifications();
             break;
     }
 }
 
 static bool fault_is_serious(shu1_heater_fault_t f) {
     return f != SHU1_HEATER_OK && f != SHU1_HEATER_DISABLED_BY_BUILD && f != SHU1_HEATER_DISABLED_BY_PROBE_LOCK;
-}
-
-static bool pending_warning(const shu1_settings_t *st) {
-    return st->material_mismatch_pending || st->pla_protection_pending || st->virtual_door_open_pending ||
-           st->filter_life_warning_pending || st->heater_wear_warning_pending || st->airflow_warning_pending ||
-           st->print_risk_warning_pending || st->start_print_warning_pending || st->setup_warning_pending ||
-           st->incident_report_pending || st->symbiont_notification_pending;
 }
 
 static void update_indicator_leds(void) {
@@ -241,23 +290,18 @@ static void update_indicator_leds(void) {
     shu1_runtime_t rt = shu1_state_get_runtime();
 
     bool fault = fault_is_serious(rt.heater_fault) || rt.notification_level >= SHU1_NOTIFY_CRITICAL;
-    bool warn = pending_warning(&st) || rt.notification_level == SHU1_NOTIFY_WARNING || rt.notification_level == SHU1_NOTIFY_ACTION;
     bool active = st.work_on || st.preheat_running || st.drying_running || st.dryout_running || st.health_test_running || st.keep_warm_active || st.pickup_active;
 
     bool auto_led = (st.work_mode == SHU1_MODE_AUTO) && active;
-    bool on_led = active && (st.work_mode != SHU1_MODE_AUTO);
-    bool off_led = !active;
+    bool on_led = active && st.work_mode != SHU1_MODE_AUTO && st.work_mode != SHU1_MODE_DRYING;
+    bool dry_led = active && st.work_mode == SHU1_MODE_DRYING;
 
     // Error LED: fast blink on critical/fault, slow blink on warnings/pending notifications.
-    gpio_write_if_valid(CONFIG_SHU1_LED_ERROR_GPIO, fault ? fast : (warn ? slow : false));
     gpio_write_if_valid(CONFIG_SHU1_LED_AUTO_GPIO, auto_led ? true : ((st.work_mode == SHU1_MODE_AUTO) ? slow : false));
     gpio_write_if_valid(CONFIG_SHU1_LED_ON_GPIO, on_led ? true : (rt.fan_output_on ? slow : false));
-    gpio_write_if_valid(CONFIG_SHU1_LED_OFF_GPIO, off_led ? true : (rt.fan_output_on ? slow : false));
-
-    // Optional connectivity indicators; when we cannot verify status, keep them off.
-    shu1_printer_state_t pr = shu1_state_get_printer();
-    gpio_write_if_valid(CONFIG_SHU1_LED_WIFI_GPIO, pr.moonraker_connected ? true : slow);
-    gpio_write_if_valid(CONFIG_SHU1_LED_BLE_GPIO, CONFIG_SHU1_ENABLE_BLE ? true : false);
+    gpio_write_if_valid(CONFIG_SHU1_LED_DRY_GPIO, dry_led);
+    if (CONFIG_SHU1_ENABLE_POWER_LED)
+        gpio_write_if_valid(CONFIG_SHU1_LED_POWER_GPIO, fault ? fast : true);
 }
 
 static void poll_buttons(void) {
@@ -266,6 +310,15 @@ static void poll_buttons(void) {
         shu1_button_t *b = &g_buttons[i];
         if (!b->enabled) continue;
         bool raw_pressed = raw_to_pressed(gpio_get_level((gpio_num_t)b->gpio));
+        if (b->ignore_until_released) {
+            if (!raw_pressed) {
+                b->ignore_until_released = false;
+                b->raw_pressed_last = false;
+                b->stable_pressed = false;
+                b->raw_changed_ms = now_ms;
+            }
+            continue;
+        }
         if (raw_pressed != b->raw_pressed_last) {
             b->raw_pressed_last = raw_pressed;
             b->raw_changed_ms = now_ms;
@@ -288,6 +341,28 @@ static void poll_buttons(void) {
             handle_button_event(b, true);
         }
     }
+
+    // DragonBreath recovery gesture: Power+Auto, both debounced-held for 5 s.
+    // Mark both consumed as soon as the combo forms so neither 2 s long-press nor
+    // the trailing release can also emit its ordinary action.
+    const bool combo = g_buttons[0].enabled && g_buttons[1].enabled &&
+                       g_buttons[0].stable_pressed && g_buttons[1].stable_pressed;
+    if (combo && !g_reset_combo_active) {
+        g_reset_combo_active = true;
+        g_reset_combo_started_ms = now_ms;
+        g_buttons[0].long_fired = true;
+        g_buttons[1].long_fired = true;
+    } else if (!combo) {
+        g_reset_combo_active = false;
+        g_reset_combo_started_ms = 0;
+    }
+    if (g_reset_combo_active && now_ms - g_reset_combo_started_ms >= 5000) {
+        // Attempt once per hold, using the common cold/idle reset.
+        g_reset_combo_started_ms = INT64_MAX;
+        esp_err_t err = shu1_settings_store_factory_reset();
+        if (err != ESP_OK)
+            ESP_LOGW(TAG, "factory reset rejected/failed: %s", esp_err_to_name(err));
+    }
 }
 
 static void physical_task(void *arg) {
@@ -299,6 +374,7 @@ static void physical_task(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(CONFIG_SHU1_PHYSICAL_TASK_PERIOD_MS));
     }
 }
+#endif
 
 esp_err_t shu1_physical_controls_start(void) {
 #if !CONFIG_SHU1_ENABLE_PHYSICAL_CONTROLS
@@ -309,10 +385,8 @@ esp_err_t shu1_physical_controls_start(void) {
 
     configure_output(CONFIG_SHU1_LED_AUTO_GPIO);
     configure_output(CONFIG_SHU1_LED_ON_GPIO);
-    configure_output(CONFIG_SHU1_LED_OFF_GPIO);
-    configure_output(CONFIG_SHU1_LED_ERROR_GPIO);
-    configure_output(CONFIG_SHU1_LED_WIFI_GPIO);
-    configure_output(CONFIG_SHU1_LED_BLE_GPIO);
+    configure_output(CONFIG_SHU1_LED_DRY_GPIO);
+    if (CONFIG_SHU1_ENABLE_POWER_LED) configure_output(CONFIG_SHU1_LED_POWER_GPIO);
 
     for (size_t i = 0; i < sizeof(g_buttons) / sizeof(g_buttons[0]); ++i) {
         if (valid_gpio(g_buttons[i].gpio)) {
@@ -321,6 +395,7 @@ esp_err_t shu1_physical_controls_start(void) {
             bool raw_pressed = raw_to_pressed(gpio_get_level((gpio_num_t)g_buttons[i].gpio));
             g_buttons[i].raw_pressed_last = raw_pressed;
             g_buttons[i].stable_pressed = raw_pressed;
+            g_buttons[i].ignore_until_released = raw_pressed;
             g_buttons[i].raw_changed_ms = esp_timer_get_time() / 1000;
             ESP_LOGW(TAG, "button %-7s mapped to GPIO%d", g_buttons[i].name, g_buttons[i].gpio);
         } else {
@@ -329,7 +404,7 @@ esp_err_t shu1_physical_controls_start(void) {
     }
 
     update_indicator_leds();
-    BaseType_t ok = xTaskCreate(physical_task, "shu1_phys", 4096, NULL, 5, NULL);
+    BaseType_t ok = xTaskCreate(physical_task, "shu1_phys", CONFIG_SHU1_PHYSICAL_TASK_STACK_BYTES, NULL, 4, NULL);
     return ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 #endif
 }

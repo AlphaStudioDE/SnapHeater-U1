@@ -1,35 +1,31 @@
-# Panda Breath TRIAC Fan Control
+# Panda Breath fan/TRIAC control
 
-SnapHeater U1 drives the Panda Breath fan through the accepted hardware map:
+SnapHeater U1 follows the hardware behavior documented and implemented by
+[DragonBreath](https://github.com/plastikman/DragonBreath) for original Panda
+Breath V1.0/V1.0.1 electronics:
 
-```txt
-GPIO3 = TRIAC gate
-GPIO7 = zero-cross detector
+```text
+GPIO3 = fan optotriac gate, HIGH means ON, LOW means OFF
+GPIO7 = zero-cross input, pull-up, rising edge
 ```
 
-The firmware uses GPIO7 interrupts to detect AC half-cycles and a GPTimer to
-schedule a short GPIO3 gate pulse after each zero-cross event.
+The fan gate is a held ON/OFF level. It is **not** PWM, phase-angle control or a
+short gate pulse. An ON request is applied only at the next accepted zero-cross;
+an OFF request drives GPIO3 LOW immediately. Edges less than 4000 us after the
+previous accepted edge are rejected as glitches. A missing zero-cross signal
+makes the fan-running interlock false, so the heater SSR cannot energize.
 
-Default tuning:
+Forbidden implementations on this board:
 
-```txt
-CONFIG_SHU1_ENABLE_FAN_TRIAC_CONTROL=y
-CONFIG_SHU1_AC_MAINS_HZ=50
-CONFIG_SHU1_ZERO_CROSS_RISING_EDGE=y
-CONFIG_SHU1_FAN_TRIAC_RUN_PERCENT=100
-CONFIG_SHU1_FAN_TRIAC_MIN_DELAY_US=200
-CONFIG_SHU1_FAN_TRIAC_GATE_PULSE_US=100
-```
+- fan PWM or phase chopping,
+- GPTimer-delayed gate pulses,
+- a plain GPIO fallback that bypasses zero-cross qualification,
+- raw force-ON diagnostics.
 
-The current safety loop requests fan as ON/OFF. When fan is ON, the TRIAC driver
-uses `CONFIG_SHU1_FAN_TRIAC_RUN_PERCENT`. Later UI work can expose variable fan
-speed if real hardware testing shows it is useful.
+Repository defaults keep fan and heater outputs disabled. The
+`sdkconfig.panda-safe.defaults` overlay compiles the real held-gate fan path for
+non-heating verification while leaving the heater output disabled. Physical
+validation is still required before producing a heating-enabled build.
 
-If a DIY build uses a DC fan driver instead of Panda Breath AC/TRIAC hardware,
-set:
-
-```txt
-CONFIG_SHU1_ENABLE_FAN_TRIAC_CONTROL=n
-```
-
-Then `CONFIG_SHU1_FAN_GPIO` is driven as a plain output.
+Source provenance: DragonBreath `docs/HARDWARE.md` and `components/pb_fan`, MIT
+License. See `THIRD_PARTY_NOTICES.md`.

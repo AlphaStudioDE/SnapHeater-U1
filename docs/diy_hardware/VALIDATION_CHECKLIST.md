@@ -57,7 +57,7 @@ Only continue after fan and sensors pass.
 - [ ] Heater connector and MOSFET path are identified.
 - [ ] Independent temperature observation is available.
 - [ ] Emergency power cutoff is ready.
-- [ ] First heater pulse is short.
+- [ ] First heater test uses a low target through the target-specific normal controller; no direct GPIO pulse.
 - [ ] Heater turns off after pulse.
 - [ ] Heater polarity is confirmed.
 - [ ] PTC temperature response is plausible.

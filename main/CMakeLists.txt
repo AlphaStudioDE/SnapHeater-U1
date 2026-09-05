@@ -4,6 +4,9 @@ idf_component_register(
         "app_state.c"
         "wifi_sta.c"
         "ntc.c"
+        "dc_pid.c"
+        "control_lease.c"
+        "safety_latch.c"
         "heater.c"
         "fan_triac.c"
         "safety.c"
@@ -27,5 +30,7 @@ idf_component_register(
         driver
         json
         esp_websocket_client
+        app_update
+        mbedtls
         bt
 )

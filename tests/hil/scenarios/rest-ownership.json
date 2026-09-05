@@ -1,0 +1,43 @@
+{
+  "name": "REST ownership, revision and lease",
+  "targets": ["devboard"],
+  "steps": [
+    {
+      "name": "start from unconditional safe stop",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"safe_stop": true}},
+      "expect": {"http_status": 200, "settings.work_on": false, "control.owner": "none"}
+    },
+    {
+      "name": "read authoritative revision",
+      "request": {"path": "/api/status"},
+      "expect": {"http_status": 200, "runtime.heater_output_on": false},
+      "save": {"off_revision": "control.state_revision"}
+    },
+    {
+      "name": "claim REST heat session",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"work_on": true, "work_mode": 2, "set_temp": 45, "expected_revision": "$off_revision"}},
+      "expect": {"http_status": 200, "settings.work_on": true, "control.owner": "rest", "control.lease_active": true},
+      "save": {"lease": "lease_id", "owned_revision": "control.state_revision"}
+    },
+    {
+      "name": "exact lease heartbeat",
+      "request": {"method": "POST", "path": "/api/v2/heartbeat", "json": {"lease_id": "$lease"}},
+      "expect": {"http_status": 200, "ok": true}
+    },
+    {
+      "name": "stale revision is rejected",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"set_temp": 46, "lease_id": "$lease", "expected_revision": "$off_revision"}},
+      "expect": {"http_status": 409, "error": "stale_revision"}
+    },
+    {
+      "name": "wrong lease is rejected",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"set_temp": 46, "lease_id": "00000000000000000000000000000000", "expected_revision": "$owned_revision"}},
+      "expect": {"http_status": 423, "error": "invalid_lease"}
+    },
+    {
+      "name": "OFF remains unconditional",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"work_on": false}},
+      "expect": {"http_status": 200, "settings.work_on": false, "control.owner": "none", "runtime.heater_output_on": false}
+    }
+  ]
+}

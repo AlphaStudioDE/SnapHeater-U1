@@ -1,5 +1,9 @@
 # DIY Reference BOM
 
+> Legacy AirGuard/DIY concept only. It is not electrically compatible with the
+> active stock Panda Breath firmware target or its DragonBreath-derived NTC
+> table, TRIAC fan drive and pin map.
+
 This bill of materials describes component roles and selection criteria. Exact parts depend on the target voltage, heater power, enclosure and local availability.
 
 For example part families and AliExpress search links, see [SOURCING_EXAMPLES.md](SOURCING_EXAMPLES.md).
@@ -37,15 +41,9 @@ For example part families and AliExpress search links, see [SOURCING_EXAMPLES.md
 | NTC divider resistor for PTC sensor | 1 | Match firmware assumptions or update config/calibration |
 | Optional RC filter components | 2 sets | Useful for noisy ADC wiring |
 
-Default firmware assumptions:
-
-```txt
-CONFIG_SHU1_NTC_BETA=3950
-CONFIG_SHU1_NTC_R0_OHM=100000
-CONFIG_SHU1_NTC_SERIES_OHM=100000
-```
-
-If your thermistors or divider resistors differ, update firmware configuration and validate readings before any output test.
+The current stock-Panda firmware uses DragonBreath's 114-entry lookup table and
+33k/82k strap detection, not configurable Beta-model thermistors. A DIY sensor
+divider therefore requires a separate hardware target and conversion layer.
 
 ## Physical Controls And Indicators
 
@@ -57,7 +55,7 @@ If your thermistors or divider resistors differ, update firmware configuration a
 | ACK button | optional | For acknowledging warnings |
 | Status LEDs | optional | Use current-limiting resistors or LED driver |
 
-Unknown or unused GPIOs should stay `-1` in firmware configuration.
+Do not apply the stock Panda defaults to this conceptual DIY circuit.
 
 ## Power Sizing Notes
 

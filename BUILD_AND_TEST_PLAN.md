@@ -1,245 +1,43 @@
-# SnapHeater U1 Build and Test Plan
+# SnapHeater U1 build and test plan
 
-This plan is the recommended order for moving from the current firmware skeleton
-to the first real Panda Breath / ESP32-C3 tests.
+Target: original Panda Breath ESP32-C3 electronics, not AirGuard 300.
+This source update is not a hardware-qualified binary release.
 
-For a bench checklist to use when hardware arrives, see
-[docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md).
-For the staged criteria to unlock probe and heater output features, see
-[docs/SAFETY_UNLOCK_PROCEDURE.md](docs/SAFETY_UNLOCK_PROCEDURE.md).
+## Build and offline verification
 
-## Safety principles
+Use ESP-IDF 5.3.5 and the repository defaults. Normal heater and fan control are
+disabled by default. See [offline testing](docs/TESTING.md) for both compile
+configurations and the regression suite.
 
-1. Do not enable normal heater output during the first build.
-2. Use the accepted Panda Breath GPIO map and keep runtime safety checks active.
-3. Keep the Output Safety Latch enabled until fan, heater, sensors and output
-   polarity are confirmed through normal diagnostics.
-4. Use GPIO Probe mode only for short, supervised tests.
-5. If any sensor value is invalid, heater output must remain OFF.
+Do not flash the heater-enabled compile-test configuration merely because its
+build and simulations pass. The optional sdkconfig.panda-safe.defaults profile
+compiles the fan/front-panel implementation with the heater disabled; it is not
+an all-outputs-disabled profile.
 
-## Phase 1: Build only
+## Hardware qualification
 
-Current public baseline: the firmware skeleton has been verified to build for
-ESP32-C3 with ESP-IDF v5.3.5 using the Panda Breath-style 4 MB partition layout.
-Hardware bring-up is still pending.
+Read [current safety status](docs/SAFETY_STATUS.md),
+[qualification and arming](docs/SAFETY_UNLOCK_PROCEDURE.md), and the
+[hardware checklist](docs/HARDWARE_BRINGUP_CHECKLIST.md).
 
-```bash
-idf.py set-target esp32c3
-idf.py menuconfig
-idf.py build
-```
+The hardware map follows the credited DragonBreath findings: SSR GPIO18,
+held fan gate GPIO3, ZC GPIO7, NTC GPIO0/GPIO1 and Rref strap GPIO19.
+The upstream inferred/confirmed confidence distinction is retained in
+[GPIO notes](docs/gpio_verification.md). No phase-angle or PWM fan experiment
+should be restored.
 
-If rebuilding from a clean checkout, fix only build-related issues in this
-phase. Do not add new features until the project builds.
+The old probe API rejects diagnostic pulse commands. Do not use older probe
+unlock instructions. Use only the normal guarded control policy for qualified,
+supervised functional checks.
 
-Recommended first configuration:
+## Release gates
 
-```txt
-CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y
-CONFIG_SHU1_ENABLE_GPIO_PROBE=n
-CONFIG_SHU1_ENABLE_BLE=y
-CONFIG_SHU1_ENABLE_PHYSICAL_CONTROLS=y
-CONFIG_SHU1_HEATER_GPIO=18
-CONFIG_SHU1_FAN_GPIO=3
-CONFIG_SHU1_ZERO_CROSS_GPIO=7
-CONFIG_SHU1_CHAMBER_ADC_CH=0
-CONFIG_SHU1_PTC_ADC_CH=1
-```
+- Actual TRIAC/SSR waveform and reset/watchdog qualification.
+- Sensor and loss-of-cooling fault qualification with independent measurement.
+- Interrupted OTA, installed-bootloader compatibility and stock recovery checks.
+- BLE/REST lease and heartbeat behavior on real devices.
+- Independent thermal protection; no unattended heater qualification.
 
-Detailed button actions should remain `-1` until K1/K2/K3 behavior is mapped to
-SnapHeater actions. Current accepted hardware pins are:
-
-```txt
-GPIO18 = PTC relay / heater output
-GPIO3  = fan TRIAC gate
-GPIO7  = zero-cross detector, shared with K1 behavior
-GPIO0  = chamber/warehouse NTC ADC, also shared with K2 button net
-GPIO1  = PTC element NTC ADC
-GPIO2  = K3 button net
-GPIO6  = K1 LED
-GPIO5  = K2 LED
-GPIO4  = K3 LED
-```
-
-Do not enable shared button behavior until GPIO7 zero-cross handling and
-GPIO0/GPIO1 sensor ownership are preserved.
-
-## Phase 2: Flash without heater output
-
-After a successful build and after making or verifying a full original flash
-backup:
-
-```bash
-idf.py -p <PORT> flash monitor
-```
-
-First checks:
-
-- firmware name/version in serial log,
-- Wi-Fi init does not crash,
-- BLE advertising appears as `SnapHeater U1`,
-- REST API starts,
-- event log contains boot events,
-- no heater output is energized.
-
-## Phase 3: Local API smoke test
-
-From a device on the same LAN:
-
-```bash
-curl http://<snapheater-ip>/api/health
-curl http://<snapheater-ip>/api/status
-curl http://<snapheater-ip>/api/events
-```
-
-Expected:
-
-- JSON responses,
-- no reboot loops,
-- heater status reports controlled by runtime safety/latch state,
-- ADC fields are present even if not calibrated yet.
-
-## Phase 4: BLE smoke test
-
-Use a BLE scanner or test Android client.
-
-Checks:
-
-- device advertises as `SnapHeater U1`,
-- status characteristic can be read,
-- diagnostics characteristic can be read,
-- control characteristic rejects writes until PIN unlock if enabled,
-- after unlock, settings writes update state but do not energize heater.
-
-## Phase 5: Moonraker / Snapmaker U1 test
-
-With Snapmaker U1 online:
-
-- configure Moonraker host/IP,
-- confirm WebSocket connection,
-- confirm `server.info` / ready state,
-- confirm object list autodetection,
-- confirm status updates for:
-  - `print_stats`,
-  - `display_status`,
-  - `heater_bed`,
-  - `toolhead`,
-  - `print_task_config`,
-  - cavity/chamber temperature sensor if present.
-
-No Moonraker write actions should be used at this stage.
-
-## Phase 6: Sensor validation
-
-With heater output still disabled:
-
-1. Read chamber ADC/temperature at room temperature.
-2. Read PTC ADC/temperature at room temperature.
-3. Warm each sensor gently and verify direction of change.
-4. Check open-circuit behavior if safely possible.
-5. Check short-circuit behavior only if safe and understood.
-
-Do not proceed if ADC-to-temperature conversion is wrong.
-
-## Phase 7: Board inspection / pin verification
-
-Before GPIO Probe:
-
-- photograph PCB top and bottom,
-- identify heater connector,
-- identify fan connector,
-- identify sensor connectors,
-- identify MOSFET/driver path,
-- confirm GPIO18 PTC relay driver behavior,
-- confirm GPIO3 fan TRIAC gate behavior,
-- confirm GPIO7 zero-cross input behavior,
-- confirm GPIO0/GPIO1 sensor behavior before using shared button nets,
-- check output behavior against accepted active-high defaults,
-- verify whether the fan can run before/with heater.
-
-## Phase 8: GPIO Probe mode
-
-Only after board inspection:
-
-```txt
-CONFIG_SHU1_ENABLE_GPIO_PROBE=y
-CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y
-```
-
-Order:
-
-1. Fan pulse first.
-2. Verify GPIO3 behavior.
-3. Heater pulse only if output path is understood.
-4. Use very short pulses.
-5. Keep physical power cutoff available.
-
-Suggested probe durations:
-
-```txt
-fan pulse: 1000 ms
-heater pulse: 200-500 ms
-```
-
-## Phase 9: Output Safety Latch validation
-
-Before real heating:
-
-- fan output verified,
-- heater output verified,
-- chamber sensor valid,
-- PTC sensor valid,
-- output polarity verified,
-- first setup wizard marked complete,
-- incident/fault state clear,
-- safety score acceptable.
-
-Only then consider enabling:
-
-```txt
-CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y
-```
-
-## Phase 10: First real low-temperature test
-
-Start with conservative values:
-
-```txt
-target chamber temp: 30-35 C
-PTC cutoff: conservative
-manual session max: short
-fan post-run: enabled
-```
-
-Observe:
-
-- fan starts before or with heater,
-- chamber temp rises slowly and plausibly,
-- PTC temp remains below cutoff,
-- heater stops at target,
-- fan post-run works,
-- emergency OFF works.
-
-## Phase 11: Feature validation after safe heating
-
-Only after the basic heating loop is proven:
-
-- Preheat/Hold,
-- Heat Soak,
-- Tempering,
-- Drying,
-- Smart Pause Hold,
-- Virtual Door/Open Lid Detection,
-- Heater Health Test,
-- Energy Estimate,
-- Symbiont Mode read-only behavior.
-
-## Do not test yet
-
-Until later:
-
-- optional Moonraker write/control actions,
-- fully automatic ventilation cooperation,
-- high-temperature chamber operation,
-- unattended overnight mode,
-- scheduled preheat without supervision.
+The public regression suite and HIL tooling are available, but HIL is not an
+automatic build step. See [HIL instructions](docs/HIL.md). Private dumps, local
+reports and device credentials must never be committed or attached to releases.

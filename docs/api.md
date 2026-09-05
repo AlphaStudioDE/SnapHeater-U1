@@ -2,6 +2,14 @@
 
 The API intentionally uses simple JSON fields close to the user-facing semantics discovered in the multi-version analysis. The implementation is new and project-owned.
 
+Every mutating REST request requires `X-DragonBreath-Auth` matching the stored
+`app_nvs/ctl_token` exactly. Missing/empty credentials and NVS read errors deny
+access; header presence alone is never sufficient. Provision the first token
+through a PIN-unlocked BLE session using the dedicated `rest_token` command.
+New tokens must contain 16–64 characters. Existing nonempty credentials continue
+to work. The server intentionally sends no CORS headers. Use a trusted LAN;
+this bearer-token HTTP interface is not an encrypted transport.
+
 ## GET /api/health
 
 ```json
@@ -18,32 +26,45 @@ Important fields:
 {
   "fw_name": "SnapHeater U1",
   "fw_version": "0.2.0-dev",
-  "heater_output_build_enabled": true,
+  "heater_output_build_enabled": false,
   "gpio_probe_build_enabled": false,
+  "control": {
+    "owner": "rest",
+    "state_revision": 12,
+    "lease_active": true,
+    "lease_remaining_ms": 298000,
+    "takeover_available": true
+  },
   "hardware_pins": {
     "map_name": "panda_breath_accepted",
-    "safety_state": "heater_output_build_enabled_runtime_latch_required",
+    "safety_state": "heater_output_build_disabled",
     "deprecated_alias": false,
     "heater_gpio": 18,
     "fan_gpio": 3,
     "zero_cross_gpio": 7,
     "button_gpio": -1,
+    "button_power_gpio": 9,
+    "button_auto_gpio": 8,
+    "button_on_gpio": 10,
+    "button_dry_gpio": 2,
     "led_auto_gpio": 6,
     "led_on_gpio": 5,
-    "led_off_gpio": 4,
+    "led_dry_gpio": 4,
+    "led_power_gpio": -1,
     "chamber_adc_channel": 0,
     "ptc_adc_channel": 1,
     "heater_active_high": true,
     "fan_active_high": true,
     "fan_triac_control": true,
-    "ac_mains_hz": 50,
-    "fan_triac_run_percent": 100,
-    "fan_triac_min_delay_us": 200,
-    "fan_triac_gate_pulse_us": 100,
-    "heater_status": "accepted_panda_breath_map",
-    "fan_status": "accepted_panda_breath_map",
-    "zero_cross_status": "accepted_panda_breath_map",
-    "sensor_status": "accepted_panda_breath_map"
+    "fan_drive_mode": "held_gate_zero_cross_on_immediate_off",
+    "rref_strap_gpio": 19,
+    "rref_kohm": 82,
+    "heater_status": "dragonbreath_inferred_continuity_required",
+    "fan_status": "dragonbreath_confirmed",
+    "zero_cross_status": "dragonbreath_confirmed",
+    "chamber_adc_status": "dragonbreath_inferred_continuity_required",
+    "ptc_adc_status": "dragonbreath_inferred_continuity_required",
+    "sensor_status": "dragonbreath_inferred_continuity_required"
   },
   "settings": {
     "work_on": true,
@@ -51,7 +72,7 @@ Important fields:
     "set_temp": 50,
     "filtertemp": 30,
     "hotbedtemp": 80,
-    "ptc_cutoff": 104,
+    "ptc_cutoff": 0,
     "filament_drying_mode": 1,
     "isrunning": false,
     "custom_temp": 50,
@@ -61,12 +82,18 @@ Important fields:
   "runtime": {
     "warehouse_temper": 42.1,
     "ptc_temp": 88.4,
+    "warehouse_instant_temp": 42.3,
+    "ptc_instant_temp": 89.0,
+    "warehouse_temp_offset": 0.0,
+    "ptc_temp_offset": 0.0,
     "warehouse_sensor_status": "ok",
     "ptc_sensor_status": "ok",
     "heater_requested": true,
     "heater_output_on": false,
     "fan_output_on": true,
-    "ptc_heater_status": "disabled_by_build"
+    "ptc_heater_status": "disabled_by_build",
+    "persistent_fault_latched": false,
+    "persistent_fault": "ok"
   },
   "printer": {
     "moonraker_connected": true,
@@ -81,7 +108,46 @@ Important fields:
 `inferred_pins` is still returned as a deprecated compatibility alias for older
 tools. New clients should use `hardware_pins`.
 
+## OTA and stock return
+
+`GET /api/v2/ota` reports the running/boot slot and the bootable application in
+the inactive slot. The same `ota` object is included in `/api/status`.
+
+Authenticated `POST /update` (alias `/api/v2/update`) accepts a raw ESP-IDF
+application `.bin`, never a complete 4 MB flash dump. OTA must first be enabled
+in settings and the heater, fan and every heat-capable workflow must be fully
+off. Firmware then:
+
+1. selects only `esp_ota_get_next_update_partition(NULL)`;
+2. rejects empty/oversized input;
+3. streams the image through `esp_ota_write` while calculating SHA-256;
+4. lets `esp_ota_end` validate the ESP image;
+5. accepts only project identities `SnapHeater_U1`, `dragonbreath` or stock
+   `panda_breath` and erases the first sector of a rejected image;
+6. selects the new boot slot only after all checks pass;
+7. reboots, then marks the image valid only after the safety loop reports a
+   healthy startup. Otherwise the bootloader rollback remains active.
+
+Example:
+
+```bash
+curl -X POST http://DEVICE/api/settings \
+  -H "X-DragonBreath-Auth: TOKEN" -H "Content-Type: application/json" \
+  -d '{"ota_enabled":true}'
+curl -X POST http://DEVICE/update \
+  -H "X-DragonBreath-Auth: TOKEN" -H "Content-Type: application/octet-stream" \
+  --data-binary @build/SnapHeater_U1.bin
+```
+
+Authenticated `POST /api/v2/boot-inactive` selects and reboots into an already
+bootable inactive image only when its identity is one of the three accepted
+projects. This is the Wi-Fi return-to-stock path when that slot contains the
+stock `panda_breath` application. It never writes the bootloader, partition
+table, NVS or SPIFFS.
+
 ## POST /api/settings
+
+Requires `X-DragonBreath-Auth`.
 
 Accepts partial updates:
 
@@ -92,13 +158,27 @@ Accepts partial updates:
   "set_temp": 50,
   "filtertemp": 30,
   "hotbedtemp": 80,
-  "ptc_cutoff": 104,
+  "ptc_cutoff": 0,
   "filament_drying_mode": 1,
   "isrunning": true,
   "custom_temp": 55,
-  "custom_timer": 8
+  "custom_timer": 8,
+  "warehouse_temp_offset": 0.0,
+  "ptc_temp_offset": 0.0
 }
 ```
+
+`ptc_cutoff: 0` selects the DragonBreath board-specific automatic foldback
+(33k: 99/96 C; 82k: 102/99 C). A positive override is clamped to 90..104 C.
+
+Both NTC offsets are persisted and clamped to the DragonBreath range of
+`-5.0..+5.0 C`. Control temperature is the 5-sample average; the two
+`*_instant_temp` fields expose the unaveraged values used for hard cutoffs.
+
+To request clearing a persisted heater fault, send
+`{"clear_heater_fault":true}`. This first safe-stops all heat workflows and
+does not clear the latch unless the control task sees idle operation, valid
+sensors and temperatures below both hard cutoffs.
 
 Modes:
 
@@ -131,13 +211,16 @@ Then use only on a supervised bench:
 {"output":"fan","duration_ms":1000}
 ```
 
-or:
+Heater commands are deliberately rejected:
 
 ```json
 {"output":"heater","duration_ms":200}
 ```
 
-The heater probe pulse is clamped by `CONFIG_SHU1_MAX_HEATER_PROBE_MS`. This endpoint can energize physical outputs and must not be exposed casually.
+The only accepted probe output is the fan. Heater operation is allowed only
+through the normal PID path after sensor, foldback, zero-cross, airflow, output
+latch and persistent-fault checks. The fan endpoint can energize a physical
+output and must not be exposed casually.
 
 ## Preheat / Hold mode
 
@@ -237,9 +320,21 @@ GET /api/events
 ### Factory reset
 
 ```json
-{"factory_reset":true}
+{"factory_reset":"factory-reset","expected_revision":13}
 ```
 
+
+Reset must be a dedicated request with the current revision from status; mixing
+it with other settings is rejected before changing state. All reset paths,
+including Power+Auto, require inactive workflows, outputs OFF, no fault latch,
+and both valid instantaneous NTC readings below 30°C and at most 1.5 seconds old.
+Reset preserves the fault record, NTC offsets and REST credential. A failed erase
+does not schedule a reboot and leaves maintenance active for deliberate recovery.
+
+Accepted targets are normalized to the current validation ceiling of 55°C across
+profiles and workflows. This is a setpoint ceiling, not an actual-temperature
+guarantee. Persistence errors reject the proposed start and inhibit heat for the
+remainder of the boot; individual NVS writes are not a rollback transaction.
 
 ## v0.6.0 U1 printer fields
 
@@ -270,7 +365,7 @@ These fields implement the corrected heating policy:
 
 ```json
 {
-  "fan_postrun_min": 5,
+  "cool_release": 40,
   "tempering_enabled": false,
   "tempering_end_temp": 0,
   "tempering_duration_min": 30,
@@ -281,7 +376,48 @@ These fields implement the corrected heating policy:
 
 Meaning:
 
-- `fan_postrun_min` keeps fan/filter output active after heater output turns off.
+- `cool_release` is clamped to 30–65 °C. After a heating session, the fan starts
+  unless both NTCs confirm less than `cool_release + 3`; it stops only after both
+  are known below `cool_release`. An unknown sensor retains airflow.
+
+Remote manual (`POWER_ON`) start returns a random 32-character `lease_id`.
+The caller must renew that exact lease using authenticated
+`POST /api/v2/heartbeat` with `{"lease_id":"..."}`. The fixed deadline is five
+minutes; expiry turns heating off and persists a controller-link-loss fault.
+
+REST, BLE and the physical panel all remain usable. They do not write one active
+heat session concurrently:
+
+- the first start claims the session and increments `control.state_revision`;
+- every later mutation by that remote owner includes its `lease_id` and the last
+  observed `expected_revision`;
+- a stale revision returns HTTP 409 and a missing/wrong owner or lease returns
+  HTTP 423;
+- another remote channel may send `"takeover":true`; firmware forces the heater
+  output off before atomically replacing the owner and issuing a new lease;
+- any channel can always request OFF, safe-stop or emergency-stop; this releases
+  the owner and invalidates its lease;
+- a physical button action takes local ownership and invalidates a remote lease;
+- Moonraker only updates printer telemetry. AUTO remains owned by the REST, BLE
+  or physical channel that started it, and Moonraker freshness is an additional
+  condition for heating rather than a competing command source.
+
+Example first start (using the revision returned by the preceding status read):
+
+```json
+{"work_on":true,"work_mode":2,"set_temp":50,"expected_revision":12}
+```
+
+Example owner update and explicit BLE/REST handover payload:
+
+```json
+{"set_temp":52,"lease_id":"<32 hex>","expected_revision":13}
+{"work_on":true,"takeover":true,"expected_revision":13}
+```
+
+`POST /api/v2/token` (also `/api/token`) changes the token with
+`{"token":"<16–64 characters>"}`. Empty/missing tokens are rejected. The request
+must authenticate with the current token and satisfy cold/idle maintenance rules.
 - `tempering_enabled` is a user/app option. When true, SnapHeater performs gradual chamber target reduction after AUTO print completion. When false, AUTO stops heating normally and uses fan post-run/cooldown only.
 - `tempering_end_temp` is the final virtual chamber target after print finish. `0` means ramp down to heater-off.
 - `tempering_duration_min` is selected by the user in the Android app and defines how long the ramp is stretched.
@@ -413,9 +549,6 @@ The following fields can be sent through `POST /api/settings` and BLE Control:
 {"local_recipes_enabled":true,"active_recipe_slot":2,"active_recipe_name":"ASA Large Print"}
 ```
 
-```json
-{"demo_mode_enabled":true}
-```
 
 ```json
 {"safety_score_enabled":true,"ack_setup_warning":true}

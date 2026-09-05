@@ -7,13 +7,18 @@
 #include "heater.h"
 #include "app_state.h"
 #include "fan_triac.h"
+#include "safety_latch.h"
 #include "esp_log.h"
 #include "esp_check.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <math.h>
 
 static const char *TAG = "shu1_heater";
+static bool g_last_logged_heater_on;
+static bool g_last_logged_fan_on;
+static bool g_output_log_initialized;
 
 static bool valid_gpio(int gpio) {
     return gpio >= 0 && gpio <= 21; // ESP32-C3 package dependent; verify actual module pins.
@@ -39,8 +44,21 @@ static esp_err_t configure_output(int gpio) {
     return gpio_config(&io_conf);
 }
 
+esp_err_t shu1_heater_preinit_off(void) {
+    // Establish physical OFF levels before NVS or application-state loading.
+    // This function deliberately does not touch shared state or install the ZC ISR.
+    write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
+    ESP_RETURN_ON_ERROR(configure_output(CONFIG_SHU1_HEATER_GPIO), TAG, "early heater off failed");
+    write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
+    ESP_RETURN_ON_ERROR(shu1_fan_triac_preinit_off(), TAG, "early fan off failed");
+    return ESP_OK;
+}
+
 esp_err_t shu1_heater_init(void) {
+    // Preload the safe heater level before enabling the GPIO output.
+    write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
     ESP_RETURN_ON_ERROR(configure_output(CONFIG_SHU1_HEATER_GPIO), TAG, "heater gpio config failed");
+    write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
     ESP_RETURN_ON_ERROR(configure_output(CONFIG_SHU1_STATUS_LED_GPIO), TAG, "status led gpio config failed");
     ESP_RETURN_ON_ERROR(shu1_fan_triac_init(), TAG, "fan triac init failed");
     shu1_heater_force_off();
@@ -50,26 +68,47 @@ esp_err_t shu1_heater_init(void) {
 }
 
 void shu1_heater_set(bool heater_on, bool fan_on) {
+    if (!g_output_log_initialized || heater_on != g_last_logged_heater_on || fan_on != g_last_logged_fan_on) {
+        ESP_LOGW(TAG, "PHYSICAL OUTPUT REQUEST: heater=%d fan=%d", heater_on ? 1 : 0, fan_on ? 1 : 0);
+        g_last_logged_heater_on = heater_on;
+        g_last_logged_fan_on = fan_on;
+        g_output_log_initialized = true;
+    }
+    // Request airflow first. ON is applied by the fan ISR at the next validated
+    // zero-cross; OFF is immediate. The SSR is never allowed on until that has happened.
+    if (!heater_on || !fan_on) shu1_heater_cut_power();
+    shu1_fan_triac_set(fan_on);
 #if CONFIG_SHU1_ENABLE_HEATER_OUTPUT
-    write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, heater_on, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
+    bool heater_interlock_ok = fan_on && shu1_fan_triac_is_running();
+    bool physical_heater_on = heater_on && heater_interlock_ok &&
+        !shu1_safety_latch_is_set() && !shu1_safety_latch_is_inhibited();
+    write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, physical_heater_on, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
 #else
     (void)heater_on;
+    bool physical_heater_on = false;
     write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
 #endif
-    shu1_fan_triac_set(fan_on);
-    write_gpio_if_valid(CONFIG_SHU1_STATUS_LED_GPIO, heater_on || fan_on, true);
+    write_gpio_if_valid(CONFIG_SHU1_STATUS_LED_GPIO, physical_heater_on || fan_on, true);
 
     shu1_runtime_t rt = shu1_state_get_runtime();
 #if CONFIG_SHU1_ENABLE_HEATER_OUTPUT
-    rt.heater_output_on = heater_on;
+    rt.heater_output_on = physical_heater_on;
 #else
     rt.heater_output_on = false;
 #endif
-    rt.fan_output_on = fan_on;
+    rt.fan_output_on = shu1_fan_triac_is_running();
+    shu1_state_update_runtime(&rt);
+}
+
+void shu1_heater_cut_power(void) {
+    write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
+    shu1_runtime_t rt = shu1_state_get_runtime();
+    rt.heater_output_on = false;
     shu1_state_update_runtime(&rt);
 }
 
 void shu1_heater_force_off(void) {
+    ESP_LOGW(TAG, "PHYSICAL OUTPUT FORCE OFF: heater=0 fan=0");
     write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
     shu1_fan_triac_force_off();
     write_gpio_if_valid(CONFIG_SHU1_STATUS_LED_GPIO, false, true);
@@ -81,36 +120,9 @@ void shu1_heater_force_off(void) {
 }
 
 esp_err_t shu1_heater_probe_pulse(shu1_output_t output, int duration_ms) {
-#if !CONFIG_SHU1_ENABLE_GPIO_PROBE
+    // Diagnostic pulses must not be a second writer that can steal safety airflow.
+    // Use the normal control policy for supervised functional checks.
     (void)output;
     (void)duration_ms;
     return ESP_ERR_INVALID_STATE;
-#else
-    if (output == SHU1_OUTPUT_HEATER) {
-        if (!valid_gpio(CONFIG_SHU1_HEATER_GPIO)) return ESP_ERR_INVALID_ARG;
-        if (duration_ms < 50) duration_ms = 50;
-        if (duration_ms > CONFIG_SHU1_MAX_HEATER_PROBE_MS) duration_ms = CONFIG_SHU1_MAX_HEATER_PROBE_MS;
-        ESP_LOGW(TAG, "HEATER PROBE PULSE: GPIO%d for %d ms", CONFIG_SHU1_HEATER_GPIO, duration_ms);
-        // Keep fan on during heater pulse if fan GPIO is available.
-        shu1_fan_triac_set(true);
-        vTaskDelay(pdMS_TO_TICKS(100));
-        write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, true, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
-        vTaskDelay(pdMS_TO_TICKS(duration_ms));
-        write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
-        vTaskDelay(pdMS_TO_TICKS(500));
-        shu1_fan_triac_set(false);
-        return ESP_OK;
-    }
-    if (output == SHU1_OUTPUT_FAN) {
-        if (!valid_gpio(CONFIG_SHU1_FAN_GPIO)) return ESP_ERR_INVALID_ARG;
-        if (duration_ms < 100) duration_ms = 100;
-        if (duration_ms > CONFIG_SHU1_MAX_FAN_PROBE_MS) duration_ms = CONFIG_SHU1_MAX_FAN_PROBE_MS;
-        ESP_LOGW(TAG, "FAN PROBE PULSE: GPIO%d for %d ms", CONFIG_SHU1_FAN_GPIO, duration_ms);
-        shu1_fan_triac_set(true);
-        vTaskDelay(pdMS_TO_TICKS(duration_ms));
-        shu1_fan_triac_set(false);
-        return ESP_OK;
-    }
-    return ESP_ERR_INVALID_ARG;
-#endif
 }

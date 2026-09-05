@@ -2,6 +2,8 @@
 
 Recommended reading order:
 
+Start with [current safety status](SAFETY_STATUS.md) and [offline testing](TESTING.md).
+
 1. [System diagrams](SYSTEM_DIAGRAMS.md)
 2. [API notes](api.md)
 3. [BLE / Android notes](ble_android.md)

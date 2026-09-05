@@ -1,5 +1,9 @@
 # DIY Reference Wiring Diagram
 
+> Legacy AirGuard/DIY concept only. It is not a wiring diagram for original
+> Panda Breath electronics and cannot use the active stock-Panda firmware
+> configuration without a separate board port.
+
 This diagram shows logical connections for a low-voltage DC reference build.
 
 It is not a PCB layout and does not replace electrical review.
@@ -48,12 +52,13 @@ CONFIG_SHU1_HEATER_GPIO=<your heater driver GPIO>
 CONFIG_SHU1_FAN_GPIO=<your fan driver GPIO>
 CONFIG_SHU1_CHAMBER_ADC_CH=<your chamber ADC channel>
 CONFIG_SHU1_PTC_ADC_CH=<your PTC ADC channel>
-CONFIG_SHU1_BUTTON_OFF_GPIO=<your OFF button GPIO or -1>
 CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n
 CONFIG_SHU1_ENABLE_GPIO_PROBE=n
 ```
 
-Do not copy example GPIOs blindly. Use pins available on the actual ESP32-C3 board.
+The active firmware no longer exposes a generic DIY OFF-button mapping or a
+configurable Beta NTC model. Do not copy this conceptual topology into the
+stock-Panda build.
 
 ## Heater Driver Requirements
 

@@ -70,7 +70,7 @@ Legend:
 | Energy Estimate | Yes | Status | Yes | Yes | No | Yes | Uses heater on-time and nominal wattage. |
 | Local Recipes | Yes | BLE/REST | Yes | No | Optional | Yes | Recipe metadata and selection. |
 | Export / Import Settings | Yes | REST/BLE concept | Yes | No | No | Yes | JSON settings exchange. |
-| Firmware Demo Mode | Yes | Settings | Yes | No | No | Optional | Useful for contest video and app testing. |
+| Offline safety simulations | Tests only | No | No | No | No | No | Separate host tests; production demo mode removed. |
 | Contest / Showcase Mode | Yes | Settings | Yes | No | No | Optional | Guided simulation scenes. |
 | First Setup Wizard | Yes | BLE/REST state | Yes | Yes | Yes | Yes | Commissioning checklist. |
 | Output Safety Latch | Yes | Internal/API | Yes | Yes | No | Yes | Runtime lock even if heater output compile flag is enabled. |

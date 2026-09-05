@@ -171,8 +171,9 @@ Designed for local operation without cloud dependency.
 ### Temperature History Buffer
 Stores recent thermal data for charts, diagnostics and stability evaluation.
 
-### Demo / Showcase Mode
-Simulates key workflows for testing, presentation and contest videos.
+### Offline regression simulations
+Exercise production safety logic with simulated inputs, separate from device control.
+Production demo mode has been removed.
 
 ---
 

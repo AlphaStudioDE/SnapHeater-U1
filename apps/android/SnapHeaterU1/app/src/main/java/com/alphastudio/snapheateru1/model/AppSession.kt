@@ -8,5 +8,5 @@ package com.alphastudio.snapheateru1.model
 
 enum class AppSession {
     Connect,
-    Demo,
+    Connected,
 }

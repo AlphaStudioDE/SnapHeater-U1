@@ -51,13 +51,18 @@ fun ConnectScreen(
     deviceAddress: String,
     connectionStatus: String,
     isConnecting: Boolean,
+    isScanning: Boolean,
+    scanMessage: String,
     onDeviceAddress: (String) -> Unit,
     onConnect: () -> Unit,
-    onDemoMode: () -> Unit,
+    onBleConnect: () -> Unit,
+    onBleSearch: () -> Unit,
 ) {
     val ready = stringResource(R.string.status_ready)
-    val noDevice = stringResource(R.string.connect_no_device)
-    var scanState by remember { mutableStateOf(ready) }
+    val canConnectOverBle = deviceAddress.startsWith("ble://", ignoreCase = true)
+    val canConnectOverLan = deviceAddress.isNotBlank() &&
+        !deviceAddress.contains(":") &&
+        !canConnectOverBle
 
     Column(
         modifier = Modifier
@@ -110,32 +115,37 @@ fun ConnectScreen(
 
                 Button(
                     onClick = onConnect,
-                    enabled = !isConnecting && deviceAddress.isNotBlank(),
+                    enabled = !isConnecting && canConnectOverLan,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(if (isConnecting) stringResource(R.string.status_connecting) else stringResource(R.string.connect_over_lan))
                 }
 
+                if (canConnectOverBle) {
+                    Button(
+                        onClick = onBleConnect,
+                        enabled = !isConnecting,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.Bluetooth, contentDescription = null)
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(if (isConnecting) stringResource(R.string.status_connecting) else stringResource(R.string.connect_over_ble))
+                    }
+                }
+
                 Button(
-                    onClick = { scanState = noDevice },
+                    onClick = onBleSearch,
+                    enabled = !isScanning,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Filled.Bluetooth, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text(stringResource(R.string.connect_search))
+                    Text(if (isScanning) stringResource(R.string.status_scanning) else stringResource(R.string.connect_search))
                 }
 
-                FilledTonalButton(
-                    onClick = onDemoMode,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text(stringResource(R.string.status_demo_mode))
-                }
 
-                if (scanState != ready) {
-                    Text(scanState, color = StatusColors.Warning, style = MaterialTheme.typography.bodySmall)
+                if (scanMessage != ready) {
+                    Text(scanMessage, color = StatusColors.Warning, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -165,11 +175,5 @@ fun ConnectScreen(
             }
         }
 
-        OutlinedButton(
-            onClick = onDemoMode,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.connect_continue_without_device))
-        }
     }
 }

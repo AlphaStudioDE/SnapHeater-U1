@@ -1,7 +1,9 @@
 # ESP-IDF build output
 /build/
+/build-*/
 sdkconfig
 sdkconfig.old
+sdkconfig.compile-test*
 managed_components/
 dependencies.lock
 
@@ -31,3 +33,17 @@ reports/
 *.elf
 *.map
 !firmware/original/generic.bin
+
+# Local analysis, publication drafts and generated test output
+__pycache__/
+*.pyc
+/hil-results/
+/docs/audit_sources/
+/docs/*AUDIT*.md
+/docs/*_2026-*.md
+/docs/DRAGONBREATH_VENDOR_INTEGRATION*.md
+/docs/PANDA_BREATH_CUSTOM_FIRMWARE_ARCHIVE.md
+/docs/STOCK_FIRMWARE_CONTROL_STRATEGY.md
+/apps/android/SnapHeaterU1/design_proposals/
+/apps/android/SnapHeaterU1/ui_render_mock.png
+/tools/check_stock_boot_artifacts.py

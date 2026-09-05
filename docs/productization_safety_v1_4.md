@@ -12,7 +12,7 @@ This release adds the final productization layer before first hardware build tes
 6. **Local-only Mode** — default privacy stance: BLE + LAN; no cloud required.
 7. **Language/Event Codes** — firmware exposes event/notification codes; Android translates EN/DE/PL.
 8. **OTA/Rollback placeholders** — fields exist for future safe OTA and rollback flow.
-9. **Contest/Showcase Mode** — separate from demo mode; intended for Snapmaker Innovation Fund videos and app demos.
+9. **Contest/Showcase Mode** — presentation-oriented UI settings; this does not simulate firmware sensor or printer state.
 10. **U1 Symbiont Mode** — biological/cooperative naming for safe U1 cooperation through Moonraker.
 
 ## U1 Symbiont Mode

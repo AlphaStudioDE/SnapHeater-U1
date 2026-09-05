@@ -7,6 +7,9 @@
 package com.alphastudio.snapheateru1.ui
 
 import android.content.Context
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -42,7 +45,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.alphastudio.snapheateru1.R
+import com.alphastudio.snapheateru1.ble.SnapHeaterBleScanException
+import com.alphastudio.snapheateru1.ble.SnapHeaterBleScanner
+import com.alphastudio.snapheateru1.data.BleSnapHeaterRepository
 import com.alphastudio.snapheateru1.data.FirmwareSnapHeaterRepository
 import com.alphastudio.snapheateru1.data.SnapHeaterApiClient
 import com.alphastudio.snapheateru1.data.normalizeBaseUrl
@@ -70,36 +77,106 @@ fun SnapHeaterApp() {
     }
     var appSessionName by rememberSaveable { mutableStateOf(AppSession.Connect.name) }
     var selectedTabName by rememberSaveable { mutableStateOf(AppTab.Dashboard.name) }
+    var homeLayoutStyleName by rememberSaveable {
+        mutableStateOf(preferences.getString("home_layout_style", HomeLayoutStyle.Default.name) ?: HomeLayoutStyle.Default.name)
+    }
     var deviceAddress by rememberSaveable { mutableStateOf(preferences.getString("device_address", "") ?: "") }
     var connectedBaseUrl by rememberSaveable { mutableStateOf("") }
     var connectionStatus by rememberSaveable { mutableStateOf(context.getString(R.string.status_ready)) }
     var isConnecting by rememberSaveable { mutableStateOf(false) }
+    var isScanning by rememberSaveable { mutableStateOf(false) }
+    var scanMessage by rememberSaveable { mutableStateOf(context.getString(R.string.status_ready)) }
     var snapshot by rememberSaveable(stateSaver = HeaterSnapshotSaver) {
-        mutableStateOf(HeaterSnapshot(ble = "Demo mode"))
+        mutableStateOf(HeaterSnapshot(ble = "Disconnected"))
     }
-    val appSession = AppSession.valueOf(appSessionName)
+    val appSession = AppSession.entries.firstOrNull { it.name == appSessionName } ?: AppSession.Connect
     val selectedTab = AppTab.valueOf(selectedTabName)
+    val homeLayoutStyle = HomeLayoutStyle.fromPreference(homeLayoutStyleName)
     val modeLabel = stringResource(snapshot.mode.labelRes())
     val heatingAllowed = snapshot.heaterOutputBuildEnabled &&
-        snapshot.outputSafetyLatchArmed &&
-        snapshot.outputSafetyLatchReady &&
-        snapshot.heaterOutputVerified &&
-        snapshot.fanOutputVerified &&
-        snapshot.sensorsVerified
+        snapshot.outputSafetyLatchReady
     val safetyWarning = when {
         !snapshot.heaterOutputBuildEnabled -> stringResource(R.string.modes_block_build)
-        !snapshot.heaterOutputVerified || !snapshot.fanOutputVerified || !snapshot.sensorsVerified -> stringResource(R.string.modes_block_verification)
-        !snapshot.outputSafetyLatchArmed || !snapshot.outputSafetyLatchReady -> stringResource(R.string.modes_block_latch)
+        !snapshot.outputSafetyLatchReady -> stringResource(R.string.modes_block_latch)
         else -> stringResource(R.string.modes_available)
     }
     val scope = rememberCoroutineScope()
-    val firmwareRepository = remember(connectedBaseUrl) {
-        if (connectedBaseUrl.isBlank()) null else FirmwareSnapHeaterRepository(SnapHeaterApiClient(connectedBaseUrl))
+    val bleScanner = remember(context) { SnapHeaterBleScanner(context.applicationContext) }
+    val firmwareRepository = remember(context, connectedBaseUrl) {
+        when {
+            connectedBaseUrl.startsWith("ble://", ignoreCase = true) ->
+                BleSnapHeaterRepository(context.applicationContext, connectedBaseUrl.removePrefix("ble://"))
+            connectedBaseUrl.isNotBlank() ->
+                FirmwareSnapHeaterRepository(SnapHeaterApiClient(connectedBaseUrl))
+            else -> null
+        }
+    }
+
+    fun requestSafeStop() {
+        val pendingStop = snapshot.copy(
+            mode = AppMode.SafeStop,
+            lastConfirmedSettings = context.getString(R.string.common_pending),
+        )
+        snapshot = pendingStop
+        selectedTabName = AppTab.Modes.name
+        val repository = firmwareRepository
+        if (repository != null) {
+            scope.launch {
+                runCatching {
+                    withContext(Dispatchers.IO) { repository.applySettings(pendingStop) }
+                }.onSuccess { latest ->
+                    snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.mode_safe_stop))
+                    connectionStatus = context.getString(R.string.status_settings_confirmed)
+                }.onFailure { error ->
+                    connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
+                    snapshot = pendingStop
+                }
+            }
+        }
+    }
+
+    fun hasBlePermissions(): Boolean {
+        return SnapHeaterBleScanner.requiredPermissions().all { permission ->
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    fun startBleScan() {
+        isScanning = true
+        scanMessage = context.getString(R.string.status_scanning)
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) { bleScanner.findFirst() }
+            }.onSuccess { device ->
+                deviceAddress = "ble://${device.address}"
+                preferences.edit().putString("ble_device_address", device.address).apply()
+                scanMessage = context.getString(R.string.connect_ble_found, device.name, device.address, device.rssi)
+                connectionStatus = scanMessage
+            }.onFailure { error ->
+                scanMessage = when (error) {
+                    is SnapHeaterBleScanException -> error.message ?: context.getString(R.string.connect_no_device)
+                    else -> error.shortMessage()
+                }
+                connectionStatus = scanMessage
+            }
+            isScanning = false
+        }
+    }
+
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        if (grants.values.all { it }) {
+            startBleScan()
+        } else {
+            scanMessage = context.getString(R.string.connect_ble_permissions_required)
+            connectionStatus = scanMessage
+        }
     }
 
     LaunchedEffect(appSessionName, connectedBaseUrl) {
         val repository = firmwareRepository ?: return@LaunchedEffect
-        if (appSession != AppSession.Demo) return@LaunchedEffect
+        if (appSession != AppSession.Connected) return@LaunchedEffect
         while (true) {
             runCatching {
                 withContext(Dispatchers.IO) { repository.snapshot() }
@@ -120,10 +197,13 @@ fun SnapHeaterApp() {
                 deviceAddress = deviceAddress,
                 connectionStatus = connectionStatus,
                 isConnecting = isConnecting,
+                isScanning = isScanning,
+                scanMessage = scanMessage,
                 onDeviceAddress = {
                     deviceAddress = it
                     preferences.edit().putString("device_address", it).apply()
                     connectionStatus = context.getString(R.string.status_ready)
+                    scanMessage = context.getString(R.string.status_ready)
                 },
                 onConnect = {
                     val baseUrl = normalizeBaseUrl(deviceAddress)
@@ -139,17 +219,40 @@ fun SnapHeaterApp() {
                             preferences.edit().putString("device_address", baseUrl).apply()
                             snapshot = latest
                             connectionStatus = context.getString(R.string.status_connected_to, baseUrl)
-                            appSessionName = AppSession.Demo.name
+                            appSessionName = AppSession.Connected.name
                         }.onFailure { error ->
                             connectionStatus = context.getString(R.string.status_connection_failed, error.shortMessage())
                         }
                         isConnecting = false
                     }
                 },
-                onDemoMode = {
-                    connectedBaseUrl = ""
-                    appSessionName = AppSession.Demo.name
-                    snapshot = snapshot.copy(ble = context.getString(R.string.status_demo_mode))
+                onBleConnect = {
+                    val bleAddress = deviceAddress.removePrefix("ble://")
+                    isConnecting = true
+                    connectionStatus = context.getString(R.string.status_connecting)
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) {
+                                BleSnapHeaterRepository(context.applicationContext, bleAddress).snapshot()
+                            }
+                        }.onSuccess { latest ->
+                            connectedBaseUrl = "ble://$bleAddress"
+                            preferences.edit().putString("ble_device_address", bleAddress).apply()
+                            snapshot = latest
+                            connectionStatus = context.getString(R.string.status_connected_to, "BLE $bleAddress")
+                            appSessionName = AppSession.Connected.name
+                        }.onFailure { error ->
+                            connectionStatus = context.getString(R.string.status_connection_failed, error.shortMessage())
+                        }
+                        isConnecting = false
+                    }
+                },
+                onBleSearch = {
+                    if (hasBlePermissions()) {
+                        startBleScan()
+                    } else {
+                        blePermissionLauncher.launch(SnapHeaterBleScanner.requiredPermissions())
+                    }
                 },
             )
         }
@@ -171,16 +274,25 @@ fun SnapHeaterApp() {
         },
     ) { tab ->
         when (tab) {
-            AppTab.Dashboard -> DashboardScreen(snapshot)
+            AppTab.Dashboard -> DashboardScreen(
+                snapshot = snapshot,
+                homeLayoutStyle = homeLayoutStyle,
+                onStart = { selectedTabName = AppTab.Modes.name },
+                onSafeStop = { requestSafeStop() },
+            )
             AppTab.Modes -> ModesScreen(
                 snapshot = snapshot,
                 heatingAllowed = heatingAllowed,
                 safetyWarning = safetyWarning,
                 onMode = { mode ->
-                    snapshot = snapshot.copy(
-                        mode = mode,
-                        lastConfirmedSettings = context.getString(R.string.common_pending),
-                    )
+                    if (mode == AppMode.SafeStop) {
+                        requestSafeStop()
+                    } else {
+                        snapshot = snapshot.copy(
+                            mode = mode,
+                            lastConfirmedSettings = context.getString(R.string.common_pending),
+                        )
+                    }
                 },
                 onSnapshotChange = { updated -> snapshot = updated },
                 onConfirmSettings = { confirmed ->
@@ -219,25 +331,18 @@ fun SnapHeaterApp() {
                             }
                         }
                     } else {
-                        val armed = when {
-                            armLatch -> true
-                            disarmLatch -> false
-                            else -> updated.outputSafetyLatchArmed
-                        }
-                        snapshot = updated.copy(
-                            outputSafetyLatchArmed = armed,
-                            outputSafetyLatchReady = armed &&
-                                updated.heaterOutputVerified &&
-                                updated.fanOutputVerified &&
-                                updated.sensorsVerified,
-                            lastConfirmedSettings = context.getString(R.string.status_safety_applied_demo),
-                        )
+                        appSessionName = AppSession.Connect.name
                     }
                 },
             )
             AppTab.Diagnostics -> DiagnosticsScreen(snapshot)
             AppTab.Settings -> SettingsScreen(
                 snapshot = snapshot,
+                homeLayoutStyle = homeLayoutStyle,
+                onHomeLayoutStyle = { style ->
+                    homeLayoutStyleName = style.name
+                    preferences.edit().putString("home_layout_style", style.name).apply()
+                },
                 onTarget = { target -> snapshot = snapshot.copy(targetC = target) },
                 onSnapshotChange = { updated -> snapshot = updated },
                 onApplySettings = { updated ->
@@ -256,7 +361,7 @@ fun SnapHeaterApp() {
                             }
                         }
                     } else {
-                        snapshot = updated.copy(lastConfirmedSettings = context.getString(R.string.status_settings_applied_demo))
+                        appSessionName = AppSession.Connect.name
                     }
                 },
             )
@@ -381,7 +486,7 @@ private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
             snapshot.localRecipesEnabled,
             snapshot.scheduledPreheatEnabled,
             snapshot.localOnlyMode,
-            snapshot.demoModeEnabled,
+            false, // Reserved saved-state slot; retired firmware simulation.
             snapshot.showcaseModeEnabled,
             snapshot.symbiontModeEnabled,
             snapshot.symbiontVentilationAllowed,
@@ -406,6 +511,12 @@ private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
             snapshot.fanOutputVerified,
             snapshot.sensorsVerified,
             snapshot.moonrakerVerified,
+            snapshot.zeroCrossSignalPresent,
+            snapshot.zeroCrossEdgesPerSec,
+            snapshot.zeroCrossLastPeriodUs,
+            snapshot.zeroCrossMinPeriodUs,
+            snapshot.zeroCrossMaxPeriodUs,
+            snapshot.zeroCrossEdges,
         )
     },
     restore = { values ->
@@ -447,7 +558,6 @@ private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
             localRecipesEnabled = values[32] as Boolean,
             scheduledPreheatEnabled = values[33] as Boolean,
             localOnlyMode = values[34] as Boolean,
-            demoModeEnabled = values[35] as Boolean,
             showcaseModeEnabled = values[36] as Boolean,
             symbiontModeEnabled = values[37] as Boolean,
             symbiontVentilationAllowed = values[38] as Boolean,
@@ -471,6 +581,12 @@ private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
             fanOutputVerified = values.getOrNull(57) as? Boolean ?: false,
             sensorsVerified = values.getOrNull(58) as? Boolean ?: false,
             moonrakerVerified = values.getOrNull(59) as? Boolean ?: false,
+            zeroCrossSignalPresent = values.getOrNull(60) as? Boolean ?: false,
+            zeroCrossEdgesPerSec = values.getOrNull(61) as? Int ?: 0,
+            zeroCrossLastPeriodUs = values.getOrNull(62) as? Int ?: 0,
+            zeroCrossMinPeriodUs = values.getOrNull(63) as? Int ?: 0,
+            zeroCrossMaxPeriodUs = values.getOrNull(64) as? Int ?: 0,
+            zeroCrossEdges = values.getOrNull(65) as? Long ?: 0L,
         )
     },
 )

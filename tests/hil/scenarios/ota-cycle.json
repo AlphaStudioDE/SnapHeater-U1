@@ -1,0 +1,30 @@
+{
+  "name": "OTA inactive-slot cycle",
+  "targets": ["devboard"],
+  "requires_ota_write": true,
+  "steps": [
+    {
+      "name": "start from unconditional safe stop",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"safe_stop": true}},
+      "expect": {"http_status": 200, "settings.work_on": false, "runtime.heater_output_on": false}
+    },
+    {
+      "name": "enable authenticated OTA",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"ota_enabled": true}},
+      "expect": {"http_status": 200}
+    },
+    {
+      "name": "upload selected app image to inactive slot",
+      "request": {"method": "POST", "path": "/update", "body_file": "$firmware"},
+      "expect": {"http_status": 200, "ok": true, "rebooting": true, "project": {"contains": "SnapHeater"}}
+    },
+    {"name": "wait for reboot and health gate", "wait_s": 8},
+    {
+      "name": "new application becomes healthy",
+      "request": {"path": "/api/health"},
+      "attempts": 12,
+      "retry_delay_s": 2,
+      "expect": {"http_status": 200, "ok": true}
+    }
+  ]
+}

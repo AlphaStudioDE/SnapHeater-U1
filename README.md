@@ -2,16 +2,28 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Target: ESP32--C3](https://img.shields.io/badge/Target-ESP32--C3-blue.svg)](#build-target)
-[![Status: Development Skeleton](https://img.shields.io/badge/Status-Development%20Skeleton-orange.svg)](#current-stage)
+[![Status: DragonBreath HW Recovery](https://img.shields.io/badge/Status-DragonBreath%20HW%20Recovery-orange.svg)](#current-stage)
 [![Support: Buy Me a Coffee](https://img.shields.io/badge/Support-Buy%20Me%20a%20Coffee-yellow.svg)](https://buymeacoffee.com/damianborkh)
 
-**Smart chamber-heater firmware skeleton for Panda Breath-style ESP32-C3 hardware, designed for Snapmaker U1.**
+**SnapHeater firmware for original Panda Breath electronics with Snapmaker U1 workflows.**
 
-SnapHeater U1 is a from-scratch firmware architecture for turning a chamber-heater accessory into a printer-aware chamber climate companion for **Snapmaker U1**. It combines Moonraker-based printer awareness, BLE control, physical buttons, safety layers, thermal intelligence, post-print conditioning and presentation-ready documentation.
+SnapHeater U1 combines its existing Android, BLE, REST and Snapmaker U1 features
+with a Panda Breath hardware layer derived from the MIT-licensed
+[DragonBreath](https://github.com/plastikman/DragonBreath) project. This target
+is the original Panda Breath V1.0/V1.0.1 electronics, not AirGuard 300.
 
-> Current status: **advanced firmware baseline with accepted Panda Breath pin map**.
-> The project builds for ESP32-C3 with ESP-IDF v5.3.5. Normal heater output is build-enabled and guarded by runtime safety checks.
-> DIY reference hardware notes are available for builders who want to assemble a compatible low-voltage DC controller instead of using Panda Breath-style hardware.
+> **Project revival credit:** SnapHeater U1 could be brought back as firmware for
+> the original Panda Breath electronics thanks to the reverse-engineering,
+> hardware investigation and public documentation by
+> [`plastikman`, author and maintainer of DragonBreath](https://github.com/plastikman/DragonBreath).
+> The recovered hardware map, fan/TRIAC behavior, NTC conversion and thermal
+> findings provided the essential foundation for this revival.
+
+> Current status: **DragonBreath hardware recovery**. The recovered hardware map
+> is present, but repository defaults keep fan and heater control build-disabled;
+> boot always starts with both outputs OFF and the runtime safety latch disarmed.
+> The pinned, repository-wide comparison and remaining blockers are documented in
+> [public safety status](docs/SAFETY_STATUS.md).
 
 ---
 
@@ -54,7 +66,7 @@ Main highlights:
 - **Energy Estimate**, **Temperature History**, **Incident Report**
 - **First Setup Wizard**, **Output Safety Latch**, **Safety Score**
 - **Local-only operation**, event codes and notification levels
-- **Demo / Showcase Mode** for presentation and testing
+- **Offline regression simulations**, separate from physical control
 
 ---
 
@@ -62,19 +74,11 @@ Main highlights:
 
 ```mermaid
 flowchart LR
-    Android[Android phone
-BLE advanced control] <-->|BLE GATT| SH[SnapHeater U1
-ESP32-C3]
-    Buttons[Physical buttons
-AUTO / ON / OFF / ACK] --> SH
-    LEDs[Status LEDs
-button backlights] <-->|feedback| SH
-    Sensors[Chamber + PTC sensors] --> SH
-    Outputs[PTC heater
-Fan / filter] <-->|safe outputs| SH
-    U1[Snapmaker U1
-Moonraker / Klipper] <-->|Wi-Fi LAN
-status + optional safe chamber cooperation| SH
+    App[SnapHeater mobile app] <-->|BLE / REST| FW[SnapHeater U1 firmware]
+    FW --> Heater[Panda Breath heater,
+fan and sensors]
+    U1[Snapmaker U1 Moonraker / Klipper] <-->|LAN status, read-only first| FW
+    App --> Workflows[Modes, profiles and safety UX]
 ```
 
 Additional diagrams: [docs/SYSTEM_DIAGRAMS.md](docs/SYSTEM_DIAGRAMS.md)
@@ -85,15 +89,29 @@ Additional diagrams: [docs/SYSTEM_DIAGRAMS.md](docs/SYSTEM_DIAGRAMS.md)
 
 SnapHeater U1 uses two user-control layers:
 
+### SnapHeater on Panda Breath hardware
+
+The active path replaces the device firmware while preserving the established
+SnapHeater mobile and U1 integration surfaces. The low-level map and electrical
+behavior follow DragonBreath: heater SSR GPIO18, held fan gate GPIO3,
+zero-cross GPIO7, NTC ADC channels GPIO0/GPIO1 and Rref strap GPIO19. The
+control path uses DragonBreath's PID constants and 10-second time-proportioning
+window, 5-sample NTC averaging for control, instantaneous hard trips at 85 C
+(chamber) and 105 C (PTC), and 33k/82k-specific PTC foldback.
+
 ### Physical quick controls
 
-Basic local actions that should work without a phone:
+The DragonBreath-derived panel map provides these optional actions:
 
-- **AUTO** — printer-aware chamber mode
-- **ON** — manual chamber hold / preheat shortcut
-- **OFF** — stop / safe stop / emergency off
-- **ACK** — acknowledge local warnings or events
-- **LED/backlight feedback** — mode, connectivity and fault status
+- **Power / GPIO9** — toggle work; long press can request safe fault clearing
+- **Auto / GPIO8** — printer-aware chamber mode
+- **On / GPIO10** — manual chamber hold
+- **Dry / GPIO2** — filament drying mode
+- **Auto/On/Dry LEDs / GPIO6/5/4** — mode and fault feedback
+
+GPIO9/GPIO8/GPIO2 are strapping pins, so held-at-boot inputs are ignored until
+released. The GPIO21 Power LED remains disabled by default because it shares
+UART0 TX.
 
 ### BLE / Android advanced control
 
@@ -107,6 +125,13 @@ Advanced configuration and smart workflows:
 - Symbiont Mode settings,
 - safety validation,
 - diagnostics, events and reports.
+
+REST, BLE and the physical panel stay available at the same time, while a shared
+session arbiter prevents conflicting writes. One channel owns an active heating
+session, remote owners use a five-minute exact lease plus state revisions, OFF
+works from every channel, and an explicit takeover performs a force-off before
+ownership changes. Moonraker remains printer telemetry for AUTO rather than a
+parallel settings writer.
 
 ---
 
@@ -135,19 +160,21 @@ The goal is chamber climate cooperation, not full printer control.
 
 ## Safety philosophy
 
-The firmware skeleton includes a staged safety model:
+The active project safety model is conservative:
 
-- heater output guarded by runtime safety checks and Output Safety Latch,
-- accepted Panda Breath board pin mapping isolated in `main/board_panda_breath.h`,
-- output safety latch,
+- fan GPIO3 is a held HIGH/LOW gate, never PWM or phase-angle pulses,
+- fan ON is accepted only at a validated zero-cross; OFF is immediate,
+- the heater SSR cannot turn on until airflow is physically confirmed,
+- a 105 C hard PTC cutoff and board-specific 33k/82k soft foldback,
+- an Output Safety Latch that never arms automatically,
 - sensor fault handling,
-- PTC overtemperature protection,
 - session timeout,
 - incident report/fault snapshot,
 - first setup validation,
-- GPIO probe and staged hardware bring-up.
+- guarded diagnostics and staged hardware bring-up.
 
-> Physical heater output is available in the default Panda Breath build, but runtime safety checks must pass before heating is allowed.
+> Physical validation on the exact device revision remains required. No raw
+> force-ON path is part of the supported test flow.
 
 ## Hardware responsibility and liability
 
@@ -201,8 +228,9 @@ Useful starting points:
 - [apps/android/SnapHeaterU1](apps/android/SnapHeaterU1) — Android companion app UI prototype
 - [docs/diy_hardware/README.md](docs/diy_hardware/README.md) — DIY reference hardware BOM and wiring notes
 - [docs/HARDWARE_BRINGUP_CHECKLIST.md](docs/HARDWARE_BRINGUP_CHECKLIST.md) — first physical hardware bring-up checklist
-- [docs/panda_breath_fan_triac.md](docs/panda_breath_fan_triac.md) — Panda Breath GPIO7/GPIO3 TRIAC fan control
+- [docs/panda_breath_fan_triac.md](docs/panda_breath_fan_triac.md) — DragonBreath-derived held-gate GPIO7/GPIO3 fan control
 - [docs/SAFETY_UNLOCK_PROCEDURE.md](docs/SAFETY_UNLOCK_PROCEDURE.md) — staged criteria for unlocking probe and heater output features
+- [docs/SAFETY_STATUS.md](docs/SAFETY_STATUS.md) — current safeguards, verification and release blockers
 - [docs/SYSTEM_DIAGRAMS.md](docs/SYSTEM_DIAGRAMS.md) — Mermaid diagrams
 - [main/board_panda_breath.h](main/board_panda_breath.h) — central board pin configuration
 
@@ -217,7 +245,19 @@ ESP32-C3
 ESP-IDF
 ```
 
-Initial build command:
+The active target is original Panda Breath ESP32-C3 hardware. The hardware map
+is defined, while repository defaults keep physical power control disabled:
+
+```text
+CONFIG_SHU1_HEATER_GPIO=18
+CONFIG_SHU1_FAN_GPIO=3
+CONFIG_SHU1_ZERO_CROSS_GPIO=7
+CONFIG_SHU1_RREF_STRAP_GPIO=19
+CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n
+CONFIG_SHU1_ENABLE_FAN_TRIAC_CONTROL=n
+```
+
+Default safe build command:
 
 ```bash
 idf.py set-target esp32c3
@@ -229,9 +269,23 @@ Current build baseline:
 - target: `esp32c3`
 - ESP-IDF: `v5.3.5`
 - flash layout: Panda Breath-style `4MB` dual-OTA partition table
-- default safety: `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y` with Output Safety Latch and sensor/fault checks
+- default safety: mapped hardware, power outputs build-disabled and boot-disarmed
 
-The first hardware flash should be performed with physical heater output disabled.
+To compile the real held-gate fan path without compiling heater energization,
+add `sdkconfig.panda-safe.defaults` to `SDKCONFIG_DEFAULTS`. This is a build and
+bench-diagnostics profile, not permission to flash or energize mains hardware.
+
+Do not flash until the original image is backed up and the staged hardware
+checklist has been completed for the exact board revision.
+
+> **Stock-preserving install rule:** the intended production installation is an
+> app-only `.bin` uploaded through the stock Panda firmware updater. A plain
+> `idf.py flash` writes the bootloader, partition table and OTA data too; use it
+> only for deliberate recovery/development after making a full 4 MB backup. The
+> SnapHeater now provides an authenticated app-only OTA endpoint that writes the
+> inactive stock-layout slot, validates ESP image/project identity and retains
+> bootloader rollback. This is still not a production release until its rollback
+> and return-to-stock cycle passes the documented physical HIL qualification.
 
 ---
 
@@ -242,13 +296,14 @@ The Android companion app prototype lives in [apps/android/SnapHeaterU1](apps/an
 Current status:
 
 - Jetpack Compose UI shell
-- mock firmware state
+- mock and BLE-backed app experiments
 - SnapScreen-like status-first layout
 - dashboard, modes, safety setup, diagnostics and settings views
 - EN primary UI direction with PL and DE resources started
-- prepared for later BLE integration
+- active direction: SnapHeater BLE/REST integration with the recovered Panda hardware layer
 
-The current app UI does not control real hardware yet.
+The app controls SnapHeater firmware through its existing BLE and LAN REST
+interfaces; firmware safety remains authoritative over physical outputs.
 
 iOS is a planned target. The current iOS placeholder is documented in [apps/ios/SnapHeaterU1](apps/ios/SnapHeaterU1).
 
@@ -258,6 +313,19 @@ Android build setup notes are available in [apps/android/SnapHeaterU1/docs/BUILD
 
 
 ## License, attribution and project origin
+
+### DragonBreath project revival acknowledgement
+
+Special thanks and explicit project credit go to
+[`plastikman`, author and maintainer of DragonBreath](https://github.com/plastikman/DragonBreath).
+Their reverse-engineering and validation work on the original Panda Breath
+electronics made the hardware-focused revival of SnapHeater U1 possible.
+
+SnapHeater U1 retains its own project identity and U1-specific features, while
+the Panda Breath hardware layer is being rebuilt from the published
+DragonBreath findings and safety behavior. DragonBreath remains an independent
+MIT-licensed upstream project, and its authorship is not transferred to
+SnapHeater U1.
 
 SnapHeater U1 is licensed under the **MIT License**.
 
@@ -314,3 +382,8 @@ SnapHeater U1 now uses a Panda Breath-compatible 4 MB flash layout with two larg
 Before flashing hardware, make a full backup of the original device flash. See [`docs/FLASH_BACKUP_RESTORE.md`](docs/FLASH_BACKUP_RESTORE.md). Clean-room binary findings are summarized in [`docs/BINARY_FINDINGS_NOTES.md`](docs/BINARY_FINDINGS_NOTES.md).
 
 A generic 4 MB original-firmware restoration image is available at [`firmware/original/generic.bin`](firmware/original/generic.bin). Restore instructions are in [`docs/BACK_TO_ORIGINAL_FW.md`](docs/BACK_TO_ORIGINAL_FW.md).
+
+Do not upload that 4 MB full-flash backup to `/update`: OTA accepts only an
+application image whose embedded project identity is `SnapHeater_U1`,
+`dragonbreath` or stock `panda_breath`. See [docs/api.md](docs/api.md) and the
+adapted [HIL procedure](docs/HIL.md).

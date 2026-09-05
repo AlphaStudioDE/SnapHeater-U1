@@ -6,6 +6,12 @@ This repository includes a generic 4 MB restoration image:
 firmware/original/generic.bin
 ```
 
+This is a **full-flash recovery image**, not an OTA application image. Never
+upload it to SnapHeater `/update`. The OTA return-to-stock path accepts only a
+bootable stock application whose embedded ESP-IDF project name is
+`panda_breath`, or switches to an already validated inactive stock slot with
+`POST /api/v2/boot-inactive`.
+
 It can be used to write a Panda Breath-style ESP32-C3 device back to the generic original firmware image included with this project.
 
 ## Important responsibility note

@@ -1,5 +1,6 @@
 # SnapHeater U1 - Panda Breath original 4 MB flash layout
-# Derived from full flash dump partition table.
+# Byte-for-byte geometry confirmed against stock Panda Breath 1.0.3/1.0.4 by
+# DragonBreath, plastikman, commit 5e2f668271121c9bb2f09c5701309ca2c411f9b3 (MIT).
 # Name,    Type, SubType, Offset,   Size,     Flags
 nvs,       data, nvs,     0x9000,   0x5000,
 otadata,   data, ota,     0xe000,   0x2000,

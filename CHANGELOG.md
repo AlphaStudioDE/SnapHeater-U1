@@ -1,12 +1,43 @@
 # Changelog
 
-## v1.9.4-dev - TRIAC fan control baseline
+## September 2026 development update
+
+- Hardened shared control arbitration, unconditional OFF, leases and BLE heartbeats.
+- Added persistent zero-cross-loss shutdown: signal recovery cannot resume an armed session.
+- Hardened sensor/thermal handling, watchdog failure inhibition and SSR-before-NVS ordering.
+- Added OTA maintenance exclusion and inactive-slot validation/rollback checks.
+- Removed production demo state; retained Android BLE/REST and U1 workflows.
+- Added offline regressions and public safety/verification status, including remaining limits.
+- This source update is not a hardware-qualified binary release.
+
+## v1.9.5-dev - DragonBreath hardware recovery
+
+- Added explicit project-revival credit to `plastikman`, author and maintainer of DragonBreath, whose reverse-engineering and hardware-validation work made the Panda Breath recovery possible.
+- Restored SnapHeater U1 as firmware for original Panda Breath V1.0/V1.0.1 electronics while retaining the Android, BLE, REST and U1 workflows.
+- Adapted the DragonBreath-validated GPIO map: heater SSR GPIO18, held fan gate GPIO3, zero-cross GPIO7, NTC ADC channels 0/1 and Rref strap GPIO19.
+- Replaced phase-angle gate pulses with zero-cross-qualified held-gate ON and immediate OFF.
+- Added the stock 114-point NTC table, calibrated ADC conversion and 33k/82k reference-resistor detection.
+- Added 5-sample control averaging, instantaneous sensor trips, persisted bounded NTC offsets and exact open/short ADC thresholds.
+- Added an 85 C chamber hard cutoff, 105 C hard PTC cutoff, board-specific soft foldback and explicit non-automatic Output Safety Latch arming.
+- Ported DragonBreath's PID constants, filtered derivative, approach caps and 10-second time-proportioning window.
+- Added a persistent NVS heater-fault latch that survives reboot and requires an explicit safe clear request.
+- Replaced the old K1/K2/K3 assumptions with Power/Auto/On/Dry GPIO9/8/10/2 and LED GPIO6/5/4 mappings, including held-at-boot strap protection and the GPIO21/UART0 Power LED conflict.
+- Kept repository outputs disabled by default and added a non-heating `sdkconfig.panda-safe.defaults` hardware-layer build profile.
+- Removed the direct heater-probe path completely; all heating now requires the normal PID path, valid sensors, zero-cross-confirmed fan and runtime safety latch.
+- Added shared REST/BLE/physical session ownership with device-issued leases, exact heartbeats, mandatory state revisions, stale-command rejection, unconditional OFF and force-off takeover.
+- Added authenticated app-only OTA to the inactive stock-layout slot, streamed SHA-256, ESP image/project identity validation, delayed reboot, healthy-start rollback confirmation and validated inactive-slot/stock return.
+- Added a SnapHeater REST HIL runner, non-destructive ownership/OTA-guard scenarios, an explicit devboard-only OTA cycle and host tests for the HIL parser and OTA safety contract.
+
+## v1.9.4-dev - Superseded TRIAC fan experiment
 
 - Added Panda Breath TRIAC fan control using GPIO7 zero-cross detection and GPIO3 gate pulses.
 - Added Kconfig tuning for AC mains frequency, gate pulse width, phase delay and fan run percent.
 - Routed normal fan requests and fan probe pulses through the TRIAC/zero-cross driver.
 - Build-enabled normal heater output for the accepted Panda Breath map while keeping runtime safety checks and the Output Safety Latch.
 - Exposed TRIAC fan parameters in REST and BLE diagnostics.
+
+> Superseded in v1.9.5: the pulse/phase-angle model was incorrect for original
+> Panda Breath electronics and must not be restored.
 
 ## v1.9.3-dev - Accepted Panda Breath firmware baseline
 

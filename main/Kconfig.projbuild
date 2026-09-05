@@ -55,8 +55,8 @@ config SHU1_BLE_MAX_WRITE_BYTES
 
 config SHU1_BLE_MAX_READ_BYTES
     int "Maximum BLE read payload bytes"
-    default 1024
-    range 256 2048
+    default 4096
+    range 256 4096
 
 endmenu
 
@@ -64,7 +64,7 @@ menu "Smart heating / cooldown policy"
 
 config SHU1_DEFAULT_FAN_POSTRUN_MIN
     int "Default fan post-run time after heater off, minutes"
-    default 5
+    default 1
     range 0 60
     help
         Used as the factory default for the user setting fan_postrun_min.
@@ -90,26 +90,36 @@ endmenu
 
 menu "Panda Breath hardware pins"
 
+comment "Stock map is compile-checked; arbitrary GPIO remapping is forbidden"
+
 config SHU1_HEATER_GPIO
     int "Heater/PTC output GPIO"
     default 18
     help
-        Accepted Panda Breath PTC relay / heater output GPIO.
-        Normal heater output is guarded by runtime safety checks and latch state.
+        Panda Breath MGR GJ-5-L SSR control (RLY_MOSFET), inferred by DragonBreath.
+        DragonBreath requires continuity confirmation before flashing this pin.
+        Mapping the pin does not enable heater output; the separate build and
+        runtime safety locks remain authoritative.
 
 config SHU1_FAN_GPIO
     int "Fan/filter output GPIO"
     default 3
     help
-        Accepted Panda Breath fan TRIAC gate GPIO.
+        Panda Breath MOC3021/BT136 held-gate output, validated by DragonBreath.
 
 config SHU1_ZERO_CROSS_GPIO
     int "Zero-cross detector GPIO (-1 disables)"
     default 7
     help
-        Accepted Panda Breath zero-cross detector input. GPIO7 is shared with
-        K1 behavior in the original hardware and must not be configured as a
-        generic button.
+        Panda Breath MB6S/TLP785 zero-cross input, validated by DragonBreath.
+
+config SHU1_RREF_STRAP_GPIO
+    int "NTC reference-resistor strap GPIO"
+    default 19
+    range 0 21
+    help
+        Panda Breath board-revision strap. Firm LOW selects 82 kOhm and firm
+        HIGH selects 33 kOhm. A floating strap fails safe to 33 kOhm.
 
 config SHU1_BUTTON_GPIO
     int "Legacy generic physical button GPIO (-1 disables)"
@@ -121,6 +131,9 @@ config SHU1_BUTTON_GPIO
 config SHU1_STATUS_LED_GPIO
     int "Status LED GPIO (-1 disables)"
     default -1
+    help
+        Must remain -1 on stock Panda Breath. Use the mapped panel LEDs;
+        a generic LED writer could otherwise bypass the SSR/TRIAC driver.
 
 config SHU1_CHAMBER_ADC_CH
     int "ADC1 channel for chamber/warehouse NTC"
@@ -142,11 +155,11 @@ menu "Physical buttons and indicator LEDs"
 
 config SHU1_ENABLE_PHYSICAL_CONTROLS
     bool "Enable Panda Breath-style physical controls"
-    default y
+    default n
     help
-        Adds a local physical control layer for buttons and indicator/backlight LEDs.
-        Button GPIOs default to -1 until the K1/K2/K3 behavior is mapped to
-        SnapHeater actions. LED GPIOs may be enabled for status feedback.
+        Adds the DragonBreath-confirmed Power/Auto/On/Dry panel. GPIO9, GPIO8
+        and GPIO2 are boot strapping pins; a button held during boot is ignored
+        until released. The complete panel remains build-disabled by default.
 
 config SHU1_BUTTON_ACTIVE_LOW
     bool "Physical buttons are active low"
@@ -162,22 +175,19 @@ config SHU1_LED_ACTIVE_HIGH
 
 config SHU1_BUTTON_AUTO_GPIO
     int "AUTO button GPIO (-1 disables)"
-    default -1
+    default 8
 
 config SHU1_BUTTON_ON_GPIO
     int "ON / Manual button GPIO (-1 disables)"
-    default -1
+    default 10
 
-config SHU1_BUTTON_OFF_GPIO
-    int "OFF / Safe-stop button GPIO (-1 disables)"
-    default -1
+config SHU1_BUTTON_POWER_GPIO
+    int "Power button GPIO (-1 disables)"
+    default 9
 
-config SHU1_BUTTON_GENERIC_GPIO
-    int "Generic/acknowledge button GPIO (-1 disables)"
-    default -1
-    help
-        Optional fallback for boards with only one accessible button. Short press acknowledges
-        notifications; long press performs emergency safe-off.
+config SHU1_BUTTON_DRY_GPIO
+    int "Dry button GPIO (-1 disables)"
+    default 2
 
 config SHU1_LED_AUTO_GPIO
     int "AUTO button/backlight LED GPIO (-1 disables)"
@@ -187,25 +197,24 @@ config SHU1_LED_ON_GPIO
     int "ON/Manual button/backlight LED GPIO (-1 disables)"
     default 5
 
-config SHU1_LED_OFF_GPIO
-    int "OFF/Safe-stop button/backlight LED GPIO (-1 disables)"
+config SHU1_LED_DRY_GPIO
+    int "Dry mode LED GPIO (-1 disables)"
     default 4
 
-config SHU1_LED_ERROR_GPIO
-    int "Error/status warning LED GPIO (-1 disables)"
-    default -1
+config SHU1_ENABLE_POWER_LED
+    bool "Drive Power LED on GPIO21 (disables UART0 TX use)"
+    default n
+    help
+        GPIO21 is shared with UART0 TX. Enable only in a release build where
+        losing the serial console is intentional.
 
-config SHU1_LED_WIFI_GPIO
-    int "Wi-Fi/Moonraker indicator LED GPIO (-1 disables)"
-    default -1
-
-config SHU1_LED_BLE_GPIO
-    int "BLE indicator LED GPIO (-1 disables)"
-    default -1
+config SHU1_LED_POWER_GPIO
+    int "Power LED GPIO"
+    default 21
 
 config SHU1_PHYSICAL_DEBOUNCE_MS
     int "Button debounce time in ms"
-    default 45
+    default 20
     range 10 200
 
 config SHU1_PHYSICAL_LONG_PRESS_MS
@@ -215,20 +224,38 @@ config SHU1_PHYSICAL_LONG_PRESS_MS
 
 config SHU1_PHYSICAL_TASK_PERIOD_MS
     int "Physical controls polling period in ms"
-    default 50
-    range 20 500
+    default 10
+    range 10 500
+
+config SHU1_PHYSICAL_TASK_STACK_BYTES
+    int "Physical controls task stack size in bytes"
+    default 8192
+    range 4096 16384
+    help
+        Physical controls read the shared settings/runtime state and need more stack
+        than the minimum ESP32-C3 task size. Increase this if additional local UI
+        behavior is added.
 
 endmenu
 
 menu "Output safety locks"
 
+config SHU1_SAFETY_TASK_STACK_BYTES
+    int "Safety/control task stack size in bytes"
+    default 16384
+    range 8192 32768
+    help
+        The safety loop evaluates settings, runtime and printer state in one pass.
+        ESP32-C3 bring-up builds need a larger stack than the FreeRTOS minimum
+        because these state structures are intentionally comprehensive.
+
 config SHU1_ENABLE_HEATER_OUTPUT
     bool "Enable normal physical heater output"
-    default y
+    default n
     help
-        Enables normal physical heater output for the accepted Panda Breath map.
-        Runtime safety checks, sensor validity and the Output Safety Latch still
-        decide whether automation may energize the heater GPIO.
+        Enables normal physical heater output. Keep disabled until the
+        DragonBreath-derived Panda Breath hardware layer, sensors, zero-cross,
+        fan airflow and independent cutoff have been validated.
 
 config SHU1_HEATER_ACTIVE_HIGH
     bool "Heater output is active high"
@@ -240,64 +267,25 @@ config SHU1_FAN_ACTIVE_HIGH
     bool "Fan output is active high"
     default y
     help
-        Accepted Panda Breath polarity: HIGH = ON.
+        Panda Breath GPIO3 held-gate polarity validated by DragonBreath:
+        HIGH = fan ON at full speed, LOW = OFF.
+        Setting this to n with a mapped fan pin is a compile-time error.
 
 config SHU1_ENABLE_FAN_TRIAC_CONTROL
-    bool "Use Panda Breath TRIAC phase-angle fan control"
-    default y
-    help
-        Drives the fan through GPIO3 TRIAC gate pulses synchronized to the
-        GPIO7 zero-cross detector. Disable only for DIY hardware that uses a
-        plain DC fan driver on CONFIG_SHU1_FAN_GPIO.
-
-config SHU1_AC_MAINS_HZ
-    int "AC mains frequency for TRIAC fan control"
-    default 50
-    range 45 65
-    help
-        Used to calculate half-cycle timing for phase-angle fan control.
-
-config SHU1_ZERO_CROSS_RISING_EDGE
-    bool "Zero-cross detector triggers on rising edge"
-    default y
-    help
-        Panda Breath GPIO7 zero-cross input is treated as a rising-edge pulse
-        source by default.
-
-config SHU1_FAN_TRIAC_RUN_PERCENT
-    int "Default TRIAC fan run power percent"
-    default 100
-    range 30 100
-    help
-        Current firmware requests fan as ON/OFF, so this is the power used
-        whenever the safety loop requests fan ON. Tune after live airflow tests.
-
-config SHU1_FAN_TRIAC_MIN_DELAY_US
-    int "Minimum TRIAC gate delay after zero-cross, us"
-    default 200
-    range 50 2000
-    help
-        Even at 100 percent fan request, wait this long after zero-cross before
-        firing the TRIAC gate pulse.
-
-config SHU1_FAN_TRIAC_GATE_PULSE_US
-    int "TRIAC gate pulse width, us"
-    default 100
-    range 50 1000
-    help
-        Width of the GPIO3 gate pulse sent after each zero-cross delay.
-
-config SHU1_ENABLE_GPIO_PROBE
-    bool "Enable diagnostic GPIO pulse API"
+    bool "Use Panda Breath zero-cross held-gate fan control"
     default n
     help
-        Enables short manual pulse commands on /api/probe. This can energize outputs.
-        Use only on open bench, with current limiting and external supervision.
+        Stock-compatible binary ON/OFF control. GPIO3 is held HIGH for full-speed
+        ON and LOW for OFF; ON transitions are applied at a filtered GPIO7
+        zero-cross. The gate is never PWM'd or phase-angle chopped.
 
-config SHU1_MAX_HEATER_PROBE_MS
-    int "Maximum heater probe pulse length in ms"
-    default 300
-    range 50 1000
+config SHU1_ENABLE_GPIO_PROBE
+    bool "Enable diagnostic fan pulse API"
+    default n
+    help
+        Enables short manual fan commands on /api/probe. Heater probe commands
+        are always rejected; heating is allowed only through normal PID control
+        and all safety governors.
 
 config SHU1_MAX_FAN_PROBE_MS
     int "Maximum fan probe pulse length in ms"
@@ -306,53 +294,30 @@ config SHU1_MAX_FAN_PROBE_MS
 
 endmenu
 
-menu "NTC / ADC"
-
-config SHU1_NTC_BETA
-    int "NTC beta value"
-    default 3950
-
-config SHU1_NTC_R0_OHM
-    int "NTC nominal resistance at 25C"
-    default 100000
-
-config SHU1_NTC_SERIES_OHM
-    int "NTC series resistor"
-    default 100000
-
-config SHU1_ADC_OPEN_RAW_MIN
-    int "ADC raw value below this is treated as sensor open/invalid"
-    default 50
-
-config SHU1_ADC_SHORT_RAW_MAX
-    int "ADC raw value above this is treated as sensor short/invalid"
-    default 4050
-
-endmenu
-
 menu "Temperature policy"
 
 config SHU1_TARGET_TEMP_C
     int "Default chamber target temperature"
     default 50
-    range 0 60
+    range 0 70
 
 config SHU1_MAX_TARGET_TEMP_C
     int "Maximum user chamber target temperature"
-    default 60
-    range 35 60
-    help
-        60 C is kept as hard user limit. Higher chamber temperatures may damage printer parts.
-
-config SHU1_OVERTEMP_C
-    int "Chamber emergency overtemperature cutoff"
     default 70
-    range 45 90
+    range 30 70
+    help
+        DragonBreath-compatible user target ceiling. Fixed safety cutoffs remain
+        independent and cannot be raised through this setting.
 
 config SHU1_PTC_CUTOFF_C
-    int "PTC local cutoff temperature"
-    default 104
-    range 60 140
+    int "PTC soft foldback cutoff temperature"
+    default 0
+    range 0 104
+    help
+        0 selects DragonBreath's board-specific default (33k: 99/96 C,
+        82k: 102/99 C). An advanced positive override is constrained by
+        application code to 90..104 C. The fixed 105 C PTC and 85 C chamber
+        hard cutoffs cannot be raised by configuration.
 
 config SHU1_FILTER_TRIGGER_BED_C
     int "Default bed temp threshold for filter/fan in auto mode"

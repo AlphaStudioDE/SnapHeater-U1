@@ -2,9 +2,34 @@
 
 Version: 0.4.0-dev
 
+### Safety contract update — 2026-09-05
+
+REST, BLE and physical control remain available through the common arbiter.
+An initial REST token can be provisioned after unlocking the current BLE session
+with its configured PIN: send a separate `{"rest_token":"<16–64 characters>"}`
+write. No additional fields are accepted. The device must be cold/idle under the
+same maintenance rules as OTA/reset. Use a random token, not the example text.
+This low-level command is available in firmware; no new Android provisioning UI
+was added by the firmware fixes.
+
+Factory reset now requires a dedicated
+`{"factory_reset":"factory-reset","expected_revision":13}` request using the
+current revision. It is rejected when hot, busy, sensor data is stale/invalid,
+or a fault is latched. The physical gesture uses the same procedure.
+
+Temperature values may be JSON `null` on a sensor fault; inspect the explicit
+`chamber_sensor_status` and `ptc_sensor_status` fields. Strings are JSON-escaped.
+If a status exceeds the negotiated ATT notification size, the notification is
+`{"read":true}`: obtain the complete value with a GATT read. The existing Android
+client polls through reads. Do not parse the hint as a full status snapshot.
+
 This firmware adds a local Bluetooth Low Energy control layer for an Android app.
 BLE is intended for near-field control, emergency access and later Wi-Fi provisioning.
 Normal Snapmaker U1 synchronization still uses Wi-Fi + Moonraker.
+
+> Archived custom-firmware BLE contract. The active app direction is discovering
+> The active target is SnapHeater firmware on original Panda Breath electronics,
+> with firmware safety interlocks authoritative over Android requests.
 
 ## BLE role
 
@@ -42,13 +67,23 @@ CONFIG_SHU1_BLE_CONTROL_PIN
 
 This is an application-level lock for development. A production Android app should also use BLE pairing/bonding or an app-specific provisioning flow.
 
-The normal heater output is still blocked unless this is explicitly enabled:
+The normal heater output is still blocked in research builds unless this is explicitly enabled for DIY/research hardware:
 
 ```txt
 CONFIG_SHU1_ENABLE_HEATER_OUTPUT=y
 ```
 
 So BLE can change desired settings, but it cannot energize the physical heater when the build-level heater lock is disabled.
+
+BLE is one available control transport, not a permanent exclusive controller.
+The first BLE start claims the active heat session and returns its lease in the
+status `control` object. Later BLE mutations carry `lease_id` and
+`expected_revision`; Android renews that exact lease with a `heartbeat` write.
+REST remains readable and can always stop the device. An explicit
+`"takeover":true` switches ownership only after firmware forces heater output
+off; a new lease is then issued to the new transport. Physical buttons always
+retain local stop/takeover authority. Moonraker is AUTO telemetry, not a direct
+settings writer.
 
 ## GATT service
 
@@ -109,6 +144,16 @@ Fields:
 | `ph` | preheat phase: 0 idle, 1 heating, 2 holding, 3 complete |
 | `pr` | preheat remaining seconds during hold |
 | `pd` | preheat done pending; Android should show local notification |
+
+The current compact status also contains:
+
+```json
+{"control":{"owner":"ble","state_revision":13,"lease_active":true,"lease_remaining_ms":298000,"lease_id":"<32 hex>"}}
+```
+
+`lease_id` is exposed over BLE only to the unlocked BLE session that currently
+owns control. Other clients can observe owner/revision but cannot retrieve and
+reuse that lease.
 
 ## Control characteristic
 
@@ -360,5 +405,4 @@ The Android app should expose the following optional panels:
 - Airflow warning: `airflow_detection_enabled`.
 - Print risk and start warning: `print_risk_enabled`, `start_print_warning_enabled`.
 - Recipes: `local_recipes_enabled`, `active_recipe_slot`, `active_recipe_name`.
-- Demo mode: `demo_mode_enabled` for videos and app tests without live heating.
 - Setup safety checklist: read `safety_score`, `setup_validation_passed`, `safety_message`.

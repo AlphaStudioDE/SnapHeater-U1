@@ -14,21 +14,48 @@ import org.json.JSONObject
 class FirmwareSnapHeaterRepository(
     private val client: SnapHeaterApiClient,
 ) : SnapHeaterRepository {
-    override fun snapshot(): HeaterSnapshot = client.status().toHeaterSnapshot()
+    private var leaseId: String = ""
+    private var revision: Long = -1
+
+    override fun snapshot(): HeaterSnapshot {
+        if (leaseId.isNotBlank()) client.heartbeat(leaseId)
+        return rememberControl(client.status().toHeaterSnapshot())
+    }
+
+    private fun command(payload: JSONObject): HeaterSnapshot {
+        if (leaseId.isNotBlank()) payload.put("lease_id", leaseId)
+        if (revision >= 0) payload.put("expected_revision", revision)
+        return rememberControl(client.postSettings(payload).toHeaterSnapshot())
+    }
+
+    private fun rememberControl(value: HeaterSnapshot): HeaterSnapshot {
+        revision = value.controlStateRevision
+        if (value.controlOwner == "rest") {
+            if (value.controlLeaseId.isNotBlank()) leaseId = value.controlLeaseId
+        } else {
+            leaseId = ""
+        }
+        return value
+    }
 
     override fun setMode(mode: AppMode): HeaterSnapshot {
-        val payload = JSONObject()
-            .put("work_mode", mode.toFirmwareWorkMode())
-            .put("work_on", mode != AppMode.SafeStop)
-        return client.postSettings(payload).toHeaterSnapshot()
+        val payload = if (mode == AppMode.SafeStop) {
+            safeStopPayload()
+        } else {
+            JSONObject()
+                .put("work_mode", mode.toFirmwareWorkMode())
+                .put("work_on", true)
+                .put("takeover", true)
+        }
+        return command(payload)
     }
 
     override fun setTarget(targetC: Int): HeaterSnapshot {
-        return client.postSettings(JSONObject().put("set_temp", targetC)).toHeaterSnapshot()
+        return command(JSONObject().put("set_temp", targetC).put("takeover", true))
     }
 
     override fun applySettings(snapshot: HeaterSnapshot): HeaterSnapshot {
-        return client.postSettings(snapshot.toSettingsPayload()).toHeaterSnapshot()
+        return command(snapshot.toSettingsPayload().put("takeover", true))
     }
 
     override fun applySafety(snapshot: HeaterSnapshot, armLatch: Boolean, disarmLatch: Boolean): HeaterSnapshot {
@@ -40,7 +67,7 @@ class FirmwareSnapHeaterRepository(
             .put("moonraker_verified", snapshot.moonrakerVerified)
         if (armLatch) payload.put("arm_output_safety_latch", true)
         if (disarmLatch) payload.put("disarm_output_safety_latch", true)
-        return client.postSettings(payload).toHeaterSnapshot()
+        return command(payload)
     }
 
     fun checkHealth(): HeaterSnapshot {
@@ -68,7 +95,6 @@ private fun HeaterSnapshot.toSettingsPayload(): JSONObject {
         .put("local_recipes_enabled", localRecipesEnabled)
         .put("scheduled_preheat_enabled", scheduledPreheatEnabled)
         .put("local_only_mode", localOnlyMode)
-        .put("demo_mode_enabled", demoModeEnabled)
         .put("contest_showcase_mode_enabled", showcaseModeEnabled)
         .put("symbiont_mode_enabled", symbiontModeEnabled)
         .put("symbiont_ventilation_allowed", symbiontVentilationAllowed)
@@ -98,24 +124,31 @@ private fun HeaterSnapshot.toSettingsPayload(): JSONObject {
                 .put("tempering_duration_min", temperingDurationMin)
         }
         AppMode.SafeStop -> {
-            payload
-                .put("work_on", false)
-                .put("preheat_running", false)
-                .put("isrunning", false)
-                .put("dryout_running", false)
-                .put("health_test_running", false)
-                .put("disarm_output_safety_latch", true)
+            return safeStopPayload()
         }
     }
 
     return payload
 }
 
+private fun safeStopPayload(): JSONObject =
+    JSONObject()
+        .put("safe_stop", true)
+        .put("work_on", false)
+        .put("preheat_running", false)
+        .put("isrunning", false)
+        .put("dryout_running", false)
+        .put("health_test_running", false)
+        .put("tempering_enabled", false)
+        .put("cancel_tempering", true)
+        .put("disarm_output_safety_latch", true)
+
 private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
     val settings = optJSONObject("settings") ?: JSONObject()
     val runtime = optJSONObject("runtime") ?: JSONObject()
     val printer = optJSONObject("printer") ?: JSONObject()
     val pins = optJSONObject("hardware_pins") ?: JSONObject()
+    val control = optJSONObject("control") ?: JSONObject()
 
     val mode = firmwareModeToAppMode(
         workMode = settings.optInt("work_mode", 1),
@@ -190,11 +223,11 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         activeRecipeName = settings.optString("active_recipe_name", "Recipe").ifBlank { "Recipe" },
         scheduledPreheatEnabled = settings.optBoolean("scheduled_preheat_enabled", false),
         localOnlyMode = settings.optBoolean("local_only_mode", true),
-        demoModeEnabled = settings.optBoolean("demo_mode_enabled", false),
         showcaseModeEnabled = settings.optBoolean("contest_showcase_mode_enabled", false),
         symbiontModeEnabled = settings.optBoolean("symbiont_mode_enabled", false),
         symbiontVentilationAllowed = settings.optBoolean("symbiont_ventilation_allowed", false),
-        otaRollbackReady = settings.optBoolean("ota_rollback_placeholder_enabled", false),
+        otaRollbackReady = optJSONObject("ota")?.optJSONObject("inactive_slot")
+            ?.optBoolean("accepted_identity", false) == true,
         hardwareMapName = pins.optString("map_name", "panda_breath_accepted"),
         hardwareSafetyState = pins.optString("safety_state", "heater_output_build_enabled_runtime_latch_required"),
         heaterGpio = pins.optInt("heater_gpio", 18),
@@ -210,27 +243,15 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         fanTriacRunPercent = pins.optInt("fan_triac_run_percent", 100),
         fanTriacMinDelayUs = pins.optInt("fan_triac_min_delay_us", 200),
         fanTriacGatePulseUs = pins.optInt("fan_triac_gate_pulse_us", 100),
+        zeroCrossSignalPresent = runtime.optBoolean("zero_cross_signal_present", false),
+        zeroCrossEdgesPerSec = runtime.optInt("zero_cross_edges_per_sec", 0),
+        zeroCrossLastPeriodUs = runtime.optInt("zero_cross_last_period_us", 0),
+        zeroCrossMinPeriodUs = runtime.optInt("zero_cross_min_period_us", 0),
+        zeroCrossMaxPeriodUs = runtime.optInt("zero_cross_max_period_us", 0),
+        zeroCrossEdges = runtime.optLong("zero_cross_edges", 0L),
+        controlOwner = control.optString("owner", "none"),
+        controlStateRevision = control.optLong("state_revision", 0L),
+        controlLeaseId = optString("lease_id", ""),
+        controlLeaseRemainingMs = control.optLong("lease_remaining_ms", 0L),
     )
-}
-
-private fun AppMode.toFirmwareWorkMode(): Int = when (this) {
-    AppMode.AutoStandby -> 1
-    AppMode.ManualHold -> 2
-    AppMode.Drying -> 3
-    AppMode.Preheat -> 4
-    AppMode.Tempering -> 2
-    AppMode.SafeStop -> 2
-}
-
-private fun firmwareModeToAppMode(
-    workMode: Int,
-    preheatRunning: Boolean,
-    dryingRunning: Boolean,
-    temperingPhase: Int,
-): AppMode = when {
-    temperingPhase > 0 -> AppMode.Tempering
-    preheatRunning || workMode == 4 -> AppMode.Preheat
-    dryingRunning || workMode == 3 -> AppMode.Drying
-    workMode == 2 -> AppMode.ManualHold
-    else -> AppMode.AutoStandby
 }

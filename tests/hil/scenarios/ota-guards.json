@@ -1,0 +1,26 @@
+{
+  "name": "OTA non-destructive guards",
+  "targets": ["devboard", "panda"],
+  "steps": [
+    {
+      "name": "start from unconditional safe stop",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"safe_stop": true}},
+      "expect": {"http_status": 200, "settings.work_on": false, "runtime.heater_output_on": false}
+    },
+    {
+      "name": "explicitly disable OTA writes",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"ota_enabled": false}},
+      "expect": {"http_status": 200}
+    },
+    {
+      "name": "OTA slot information is exposed",
+      "request": {"path": "/api/v2/ota"},
+      "expect": {"http_status": 200, "ota.running_slot": {"contains": "app"}}
+    },
+    {
+      "name": "empty upload is rejected before flash write",
+      "request": {"method": "POST", "path": "/update", "raw_hex": ""},
+      "expect": {"http_status": 403, "error": "ota_disabled"}
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Panda non-heating smoke test",
+  "targets": ["panda"],
+  "steps": [
+    {
+      "name": "start from unconditional safe stop",
+      "request": {"method": "POST", "path": "/api/settings", "json": {"safe_stop": true}},
+      "expect": {"http_status": 200, "settings.work_on": false, "control.owner": "none", "runtime.heater_output_on": false}
+    },
+    {
+      "name": "accepted Panda map is reported",
+      "request": {"path": "/api/status"},
+      "expect": {
+        "http_status": 200,
+        "hardware_pins.heater_gpio": 18,
+        "hardware_pins.fan_gpio": 3,
+        "hardware_pins.zero_cross_gpio": 7,
+        "runtime.heater_output_on": false
+      }
+    },
+    {
+      "name": "event log remains readable",
+      "request": {"path": "/api/events"},
+      "expect": {"http_status": 200, "count": {"gte": 0}}
+    },
+    {
+      "name": "OTA slots remain inspectable without writes",
+      "request": {"path": "/api/v2/ota"},
+      "expect": {"http_status": 200, "ota.running_slot": {"contains": "app"}}
+    }
+  ]
+}

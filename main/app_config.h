@@ -9,7 +9,7 @@
 #include "sdkconfig.h"
 
 #define SHU1_FW_NAME        "SnapHeater U1"
-#define SHU1_FW_VERSION     "1.9.4-dev"
+#define SHU1_FW_VERSION     "1.9.5-dragonbreath-hw"
 #define SHU1_DEFAULT_MATERIAL_MISMATCH_WARNING_ENABLED 1
 #define SHU1_PROJECT_URL    "https://github.com/AlphaStudioDE/SnapHeater-U1"
 
@@ -33,23 +33,11 @@
 #ifndef CONFIG_SHU1_ZERO_CROSS_GPIO
 #define CONFIG_SHU1_ZERO_CROSS_GPIO -1
 #endif
+#ifndef CONFIG_SHU1_RREF_STRAP_GPIO
+#define CONFIG_SHU1_RREF_STRAP_GPIO 19
+#endif
 #ifndef CONFIG_SHU1_ENABLE_FAN_TRIAC_CONTROL
 #define CONFIG_SHU1_ENABLE_FAN_TRIAC_CONTROL 0
-#endif
-#ifndef CONFIG_SHU1_AC_MAINS_HZ
-#define CONFIG_SHU1_AC_MAINS_HZ 50
-#endif
-#ifndef CONFIG_SHU1_ZERO_CROSS_RISING_EDGE
-#define CONFIG_SHU1_ZERO_CROSS_RISING_EDGE 0
-#endif
-#ifndef CONFIG_SHU1_FAN_TRIAC_RUN_PERCENT
-#define CONFIG_SHU1_FAN_TRIAC_RUN_PERCENT 100
-#endif
-#ifndef CONFIG_SHU1_FAN_TRIAC_MIN_DELAY_US
-#define CONFIG_SHU1_FAN_TRIAC_MIN_DELAY_US 200
-#endif
-#ifndef CONFIG_SHU1_FAN_TRIAC_GATE_PULSE_US
-#define CONFIG_SHU1_FAN_TRIAC_GATE_PULSE_US 100
 #endif
 #ifndef CONFIG_SHU1_ENABLE_BLE
 #define CONFIG_SHU1_ENABLE_BLE 0
@@ -60,7 +48,7 @@
 
 
 #ifndef CONFIG_SHU1_DEFAULT_FAN_POSTRUN_MIN
-#define CONFIG_SHU1_DEFAULT_FAN_POSTRUN_MIN 5
+#define CONFIG_SHU1_DEFAULT_FAN_POSTRUN_MIN 1
 #endif
 #ifndef CONFIG_SHU1_DEFAULT_TEMPERING_ENABLED
 #define CONFIG_SHU1_DEFAULT_TEMPERING_ENABLED 0
@@ -113,14 +101,23 @@
 #define SHU1_PRINTER_STALE_MS                22000
 #define SHU1_CHAMBER_TEMP_EMA_ALPHA           0.25f
 
-#define SHU1_HEATER_HYST_C           2.0f
 #define SHU1_MIN_VALID_TEMP_C       -20.0f
 #define SHU1_MAX_VALID_TEMP_C       180.0f
 
 // Conservative local PTC safety. Original firmware evidence suggested a PTC safety region
 // around ~104 C. Keep configurable and verify with real hardware.
-#define SHU1_DEFAULT_PTC_CUTOFF_C   104.0f
-#define SHU1_PTC_HARD_CUTOFF_C      130.0f
+#define SHU1_DEFAULT_PTC_CUTOFF_C     0.0f
+#define SHU1_PTC_HARD_CUTOFF_C      105.0f
+#define SHU1_CHAMBER_HARD_CUTOFF_C   85.0f
+// Temporary qualification ceiling; independent of persisted/API mode targets.
+// This limits the requested setpoint, NOT physical overshoot or the hard trip.
+#define SHU1_VALIDATION_MAX_TARGET_C 55
+#define SHU1_LOCAL_FOLDBACK_CUT_C     72.0f
+#define SHU1_LOCAL_FOLDBACK_RESUME_C  67.0f
+#define SHU1_PTC_FOLDBACK_82K_CUT_C  102.0f
+#define SHU1_PTC_FOLDBACK_82K_RESUME_C 99.0f
+#define SHU1_PTC_FOLDBACK_33K_CUT_C   99.0f
+#define SHU1_PTC_FOLDBACK_33K_RESUME_C 96.0f
 
 // Heater-abnormal from-scratch detector inspired by older vendor debug strings:
 // "PTC heating start detect", "temp rise too low", "heater abnormal".
@@ -137,7 +134,7 @@
 #define SHU1_FAN_ALWAYS_ON_WITH_HEAT    1
 
 // Optional session watchdog for any user-started heater mode.
-#define SHU1_DEFAULT_MAX_SESSION_MIN     240
+#define SHU1_DEFAULT_MAX_SESSION_MIN     720
 
 // Preheat/hold mode. Hold countdown starts only after chamber reaches target.
 #define SHU1_PREHEAT_REACHED_BAND_C     0.5f
@@ -221,8 +218,6 @@
 #define SHU1_RISK_LOW      0
 #define SHU1_RISK_MEDIUM  50
 #define SHU1_RISK_HIGH    75
-#define SHU1_DEMO_IDLE      0
-#define SHU1_DEMO_RUNNING   1
 #define SHU1_SAFETY_SCORE_MIN_TO_UNLOCK 80
 
 
@@ -259,8 +254,8 @@
 #define SHU1_DEFAULT_LOCAL_ONLY_MODE        1
 #define SHU1_DEFAULT_OUTPUT_LATCH_ENABLED   1
 
-// v1.6 physical control layer: Panda Breath-style buttons and indicator LEDs.
-// Unknown LED/button GPIOs are intentionally configurable and default to disabled (-1).
+// Stock Panda Breath panel map, recovered by plastikman/DragonBreath.
+// Pins may be disabled (-1); arbitrary remaps are rejected below.
 #ifndef CONFIG_SHU1_ENABLE_PHYSICAL_CONTROLS
 #define CONFIG_SHU1_ENABLE_PHYSICAL_CONTROLS 0
 #endif
@@ -271,52 +266,52 @@
 #define CONFIG_SHU1_LED_ACTIVE_HIGH 1
 #endif
 #ifndef CONFIG_SHU1_BUTTON_AUTO_GPIO
-#define CONFIG_SHU1_BUTTON_AUTO_GPIO -1
+#define CONFIG_SHU1_BUTTON_AUTO_GPIO 8
 #endif
 #ifndef CONFIG_SHU1_BUTTON_ON_GPIO
-#define CONFIG_SHU1_BUTTON_ON_GPIO -1
+#define CONFIG_SHU1_BUTTON_ON_GPIO 10
 #endif
-#ifndef CONFIG_SHU1_BUTTON_OFF_GPIO
-#define CONFIG_SHU1_BUTTON_OFF_GPIO -1
+#ifndef CONFIG_SHU1_BUTTON_POWER_GPIO
+#define CONFIG_SHU1_BUTTON_POWER_GPIO 9
 #endif
-#ifndef CONFIG_SHU1_BUTTON_GENERIC_GPIO
-#define CONFIG_SHU1_BUTTON_GENERIC_GPIO -1
+#ifndef CONFIG_SHU1_BUTTON_DRY_GPIO
+#define CONFIG_SHU1_BUTTON_DRY_GPIO 2
 #endif
 #ifndef CONFIG_SHU1_LED_AUTO_GPIO
-#define CONFIG_SHU1_LED_AUTO_GPIO -1
+#define CONFIG_SHU1_LED_AUTO_GPIO 6
 #endif
 #ifndef CONFIG_SHU1_LED_ON_GPIO
-#define CONFIG_SHU1_LED_ON_GPIO -1
+#define CONFIG_SHU1_LED_ON_GPIO 5
 #endif
-#ifndef CONFIG_SHU1_LED_OFF_GPIO
-#define CONFIG_SHU1_LED_OFF_GPIO -1
+#ifndef CONFIG_SHU1_LED_DRY_GPIO
+#define CONFIG_SHU1_LED_DRY_GPIO 4
 #endif
-#ifndef CONFIG_SHU1_LED_ERROR_GPIO
-#define CONFIG_SHU1_LED_ERROR_GPIO -1
+#ifndef CONFIG_SHU1_ENABLE_POWER_LED
+#define CONFIG_SHU1_ENABLE_POWER_LED 0
 #endif
-#ifndef CONFIG_SHU1_LED_WIFI_GPIO
-#define CONFIG_SHU1_LED_WIFI_GPIO -1
-#endif
-#ifndef CONFIG_SHU1_LED_BLE_GPIO
-#define CONFIG_SHU1_LED_BLE_GPIO -1
+#ifndef CONFIG_SHU1_LED_POWER_GPIO
+#define CONFIG_SHU1_LED_POWER_GPIO 21
 #endif
 #ifndef CONFIG_SHU1_PHYSICAL_DEBOUNCE_MS
-#define CONFIG_SHU1_PHYSICAL_DEBOUNCE_MS 45
+#define CONFIG_SHU1_PHYSICAL_DEBOUNCE_MS 20
 #endif
 #ifndef CONFIG_SHU1_PHYSICAL_LONG_PRESS_MS
 #define CONFIG_SHU1_PHYSICAL_LONG_PRESS_MS 2000
 #endif
 #ifndef CONFIG_SHU1_PHYSICAL_TASK_PERIOD_MS
-#define CONFIG_SHU1_PHYSICAL_TASK_PERIOD_MS 50
+#define CONFIG_SHU1_PHYSICAL_TASK_PERIOD_MS 10
 #endif
 
 #define SHU1_PHYS_BTN_NONE     0
-#define SHU1_PHYS_BTN_AUTO     1
-#define SHU1_PHYS_BTN_ON       2
-#define SHU1_PHYS_BTN_OFF      3
-#define SHU1_PHYS_BTN_GENERIC  4
+#define SHU1_PHYS_BTN_POWER    1
+#define SHU1_PHYS_BTN_AUTO     2
+#define SHU1_PHYS_BTN_ON       3
+#define SHU1_PHYS_BTN_DRY      4
 
 #define SHU1_PHYS_LED_MODE_OFF       0
 #define SHU1_PHYS_LED_MODE_SOLID     1
 #define SHU1_PHYS_LED_MODE_BLINK_SLOW 2
 #define SHU1_PHYS_LED_MODE_BLINK_FAST 3
+
+// Stock Panda only: reject unsafe remaps before any GPIO code can be built.
+#include "panda_hardware_guard.h"

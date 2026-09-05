@@ -1,23 +1,27 @@
 # SnapHeater U1 Android App
 
-Android companion app shell for SnapHeater U1.
+Android/iOS-oriented companion app shell for SnapHeater U1.
 
-Current status: SnapScreen-like UI prototype with mock firmware data. BLE integration will be added after hardware validation confirms the final GATT contract and payload details.
+Current status: SnapScreen-like UI connected to the SnapHeater BLE/REST contract.
+The firmware target is original Panda Breath electronics using the recovered
+DragonBreath-derived hardware layer.
 
 ## Scope
 
-- Dashboard for chamber, PTC, target, heater/fan and connectivity status.
-- Mode controls for Auto, Manual Hold, Preheat, Drying, Tempering and Safe Stop.
-- Safety setup view for staged unlock validation.
-- Diagnostics view for event log and sensor/API status.
-- Settings view for material, temperature limit, tempering duration and local-only mode.
+- Scan and connect to devices running SnapHeater firmware.
+- Use the SnapHeater BLE and authenticated REST command contracts.
+- Dashboard for chamber, target, heater/fan and connectivity status exposed by SnapHeater firmware.
+- SnapHeater workflows guarded by firmware leases, revisions and safety interlocks.
+- Snapmaker U1 / Moonraker-aware automation from the app layer, read-only first.
+- Diagnostics view for connection, Panda hardware mapping and app-side events.
+- Settings view for material, temperature limits, tempering duration and local-only mode.
 - EN primary UI direction with PL and DE localization resources started.
 
 ## Project Structure
 
 - `app/src/main/java/.../model`: UI state models.
-- `app/src/main/java/.../data`: mock repository now, BLE-backed repository later.
-- `app/src/main/java/.../ble`: provisional BLE identifiers and integration boundary.
+- `app/src/main/java/.../data`: app repositories for BLE and REST sources; no demo repository.
+- `app/src/main/java/.../ble`: BLE scanner/client for the SnapHeater service.
 - `app/src/main/java/.../ui`: Compose app shell, screens, components and theme.
 - `docs/UI_FLOW.md`: mobile UX flow and safety boundary.
 - `docs/FIRMWARE_APP_MAP.md`: mapping between firmware features and Android UI coverage.
@@ -36,4 +40,6 @@ Build setup notes are in [docs/BUILD_SETUP.md](docs/BUILD_SETUP.md).
 
 ## Safety Boundary
 
-The UI currently uses mock data. It must not be treated as proof that heater, fan, BLE or Moonraker control is safe on real hardware.
+Physical output actions remain hidden or disabled until the SnapHeater firmware
+reports valid sensors, a verified zero-cross/fan path and an explicitly armed
+Output Safety Latch. The app cannot override firmware interlocks.

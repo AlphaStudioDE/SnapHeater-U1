@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -27,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
+import com.alphastudio.snapheateru1.ui.HomeLayoutStyle
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.components.SectionTitle
 import com.alphastudio.snapheateru1.ui.components.StatusRow
@@ -35,12 +37,41 @@ import com.alphastudio.snapheateru1.ui.theme.StatusColors
 @Composable
 fun SettingsScreen(
     snapshot: HeaterSnapshot,
+    homeLayoutStyle: HomeLayoutStyle,
+    onHomeLayoutStyle: (HomeLayoutStyle) -> Unit,
     onTarget: (Int) -> Unit,
     onSnapshotChange: (HeaterSnapshot) -> Unit,
     onApplySettings: (HeaterSnapshot) -> Unit,
 ) {
     ScreenColumn {
         SectionTitle(stringResource(R.string.settings_title), stringResource(R.string.settings_subtitle))
+
+        SettingsCard(stringResource(R.string.settings_home_layout)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                HomeLayoutStyle.entries.forEach { style ->
+                    if (style == homeLayoutStyle) {
+                        Button(
+                            onClick = { onHomeLayoutStyle(style) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(style.label)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onHomeLayoutStyle(style) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(style.label)
+                        }
+                    }
+                }
+            }
+            Text(
+                stringResource(R.string.settings_home_layout_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         Card(
             shape = RoundedCornerShape(8.dp),
@@ -134,9 +165,6 @@ fun SettingsScreen(
                 Text(stringResource(R.string.settings_connectivity), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 ToggleRow(stringResource(R.string.settings_local_only_mode), snapshot.localOnlyMode) {
                     onSnapshotChange(snapshot.copy(localOnlyMode = it))
-                }
-                ToggleRow(stringResource(R.string.settings_firmware_demo_mode), snapshot.demoModeEnabled) {
-                    onSnapshotChange(snapshot.copy(demoModeEnabled = it))
                 }
                 ToggleRow(stringResource(R.string.settings_showcase_mode), snapshot.showcaseModeEnabled) {
                     onSnapshotChange(snapshot.copy(showcaseModeEnabled = it))

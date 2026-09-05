@@ -16,8 +16,11 @@ extern "C" {
 #endif
 
 esp_err_t shu1_heater_init(void);
+esp_err_t shu1_heater_preinit_off(void);
 void shu1_heater_set(bool heater_on, bool fan_on);
 void shu1_heater_force_off(void);
+// Control-task only: remove SSR energy before persistence; preserve fan demand.
+void shu1_heater_cut_power(void);
 esp_err_t shu1_heater_probe_pulse(shu1_output_t output, int duration_ms);
 
 #ifdef __cplusplus

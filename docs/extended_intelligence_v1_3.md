@@ -17,7 +17,6 @@ This version adds the second feature pack requested for the SnapHeater U1 firmwa
 - Start Print Warning: warns if printing starts before chamber/heat soak is ready.
 - Local Recipes: active recipe slot/name placeholders for Android-managed recipe profiles.
 - Export / Import Settings: REST status JSON can be exported; POST /api/settings can import matching fields.
-- Firmware Demo Mode: simulates U1 state/material/progress for app demos without live printer data.
 - Safety Score / Setup Validation: scores sensors, Moonraker, safety features and heater build state.
 
 ## Philosophy
@@ -38,9 +37,6 @@ The new logic is warning-first. It does not cancel heating or stop the print bec
 {"pla_protection_enabled":true,"ack_pla_protection":true}
 ```
 
-```json
-{"demo_mode_enabled":true}
-```
 
 ```json
 {"local_recipes_enabled":true,"active_recipe_slot":2,"active_recipe_name":"ASA Large Print"}
@@ -59,5 +55,4 @@ The Android app should show these as optional sections:
 - Material safety warnings
 - Print risk panel
 - Setup safety checklist
-- Demo mode switch for videos/testing
 - Recipes import/export screen

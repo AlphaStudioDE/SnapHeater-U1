@@ -6,15 +6,54 @@
 
 #include "settings_store.h"
 #include "app_config.h"
+#include "safety_latch.h"
 #include "event_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "freertos/task.h"
 #include <string.h>
 #include <stdio.h>
 
 static const char *TAG = "shu1_store";
-static const char *NS = "shu1";
+static const char *NS = "app_nvs";
+
+esp_err_t shu1_settings_store_import_stock_config_if_empty(void) {
+    nvs_handle_t own;
+    if (nvs_open(NS, NVS_READONLY, &own) == ESP_OK) {
+        size_t own_len = 0;
+        esp_err_t own_err = nvs_get_str(own, "ssid", NULL, &own_len);
+        nvs_close(own);
+        if (own_err == ESP_OK && own_len > 1) return ESP_OK;
+    }
+
+    nvs_handle_t stock;
+    esp_err_t err = nvs_open("app_nvs", NVS_READONLY, &stock);
+    if (err != ESP_OK) return err;
+
+    shu1_device_config_t cfg;
+    shu1_device_config_defaults(&cfg);
+    size_t len = sizeof(cfg.wifi_ssid);
+    err = nvs_get_str(stock, "ssid", cfg.wifi_ssid, &len);
+    if (err != ESP_OK || cfg.wifi_ssid[0] == '\0') {
+        nvs_close(stock);
+        return err == ESP_OK ? ESP_ERR_NOT_FOUND : err;
+    }
+    len = sizeof(cfg.wifi_password);
+    (void)nvs_get_str(stock, "password", cfg.wifi_password, &len);
+    len = sizeof(cfg.moonraker_host);
+    (void)nvs_get_str(stock, "mk_host", cfg.moonraker_host, &len);
+    uint16_t port = (uint16_t)cfg.moonraker_port;
+    if (nvs_get_u16(stock, "mk_port", &port) == ESP_OK && port > 0)
+        cfg.moonraker_port = port;
+    nvs_close(stock);
+
+    err = shu1_settings_store_save_device_config(&cfg);
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "imported stock app_nvs Wi-Fi/Moonraker configuration without altering stock keys");
+    return err;
+}
 
 void shu1_device_config_defaults(shu1_device_config_t *cfg) {
     if (!cfg) return;
@@ -96,7 +135,6 @@ esp_err_t shu1_settings_store_load_settings(shu1_settings_t *s) {
     if (nvs_get_i32(h, "start_warn", &v) == ESP_OK) s->start_print_warning_enabled = v != 0;
     if (nvs_get_i32(h, "recipes", &v) == ESP_OK) s->local_recipes_enabled = v != 0;
     if (nvs_get_i32(h, "recipe", &v) == ESP_OK) s->active_recipe_slot = v;
-    if (nvs_get_i32(h, "demo", &v) == ESP_OK) s->demo_mode_enabled = v != 0;
     if (nvs_get_i32(h, "safety_en", &v) == ESP_OK) s->safety_score_enabled = v != 0;
     if (nvs_get_i32(h, "setup_wiz", &v) == ESP_OK) s->first_setup_wizard_enabled = v != 0;
     if (nvs_get_i32(h, "setup_step", &v) == ESP_OK) s->first_setup_step = v;
@@ -105,7 +143,9 @@ esp_err_t shu1_settings_store_load_settings(shu1_settings_t *s) {
     if (nvs_get_i32(h, "hist_sec", &v) == ESP_OK) s->history_sample_period_sec = v;
     if (nvs_get_i32(h, "inc_en", &v) == ESP_OK) s->incident_report_enabled = v != 0;
     if (nvs_get_i32(h, "out_latch", &v) == ESP_OK) s->output_safety_latch_enabled = v != 0;
-    if (nvs_get_i32(h, "out_arm", &v) == ESP_OK) s->output_safety_latch_armed = v != 0;
+    // The runtime output latch is deliberately volatile. Never restore an armed
+    // heater-capable state from NVS after a power cycle.
+    s->output_safety_latch_armed = false;
     if (nvs_get_i32(h, "h_verified", &v) == ESP_OK) s->heater_output_verified = v != 0;
     if (nvs_get_i32(h, "f_verified", &v) == ESP_OK) s->fan_output_verified = v != 0;
     if (nvs_get_i32(h, "noti_min", &v) == ESP_OK) s->notification_min_level = v;
@@ -118,6 +158,15 @@ esp_err_t shu1_settings_store_load_settings(shu1_settings_t *s) {
     if (nvs_get_i32(h, "sym_safe", &v) == ESP_OK) s->symbiont_safe_control_enabled = v != 0;
     if (nvs_get_i32(h, "sym_policy", &v) == ESP_OK) s->symbiont_policy = v;
     nvs_close(h);
+    // DragonBreath-compatible shared safety key: unsigned centi-degrees C.
+    if (nvs_open("app_nvs", NVS_READONLY, &h) == ESP_OK) {
+        uint32_t centi_c = 0;
+        if (nvs_get_u32(h, "cool_rel_c", &centi_c) == ESP_OK)
+            s->cool_release_c = (int)((centi_c + 50U) / 100U);
+        nvs_close(h);
+    }
+    if (s->cool_release_c < 30) s->cool_release_c = 30;
+    if (s->cool_release_c > 65) s->cool_release_c = 65;
     ESP_LOGI(TAG, "settings loaded from NVS if present");
     return ESP_OK;
 }
@@ -127,89 +176,94 @@ esp_err_t shu1_settings_store_save_settings(const shu1_settings_t *s) {
     nvs_handle_t h;
     esp_err_t err = open_rw(&h);
     if (err != ESP_OK) return err;
-    nvs_set_i32(h, "profile", s->material_profile);
-    nvs_set_i32(h, "target", s->target_temp_c);
-    nvs_set_i32(h, "filter", s->filter_trigger_bed_c);
-    nvs_set_i32(h, "hotbed", s->heater_trigger_bed_c);
-    nvs_set_i32(h, "ptc_cut", s->ptc_cutoff_c);
-    nvs_set_i32(h, "dry_mode", s->drying_mode);
-    nvs_set_i32(h, "custom_t", s->custom_temp_c);
-    nvs_set_i32(h, "custom_h", s->custom_timer_h);
-    nvs_set_i32(h, "pre_t", s->preheat_target_temp_c);
-    nvs_set_i32(h, "pre_min", s->preheat_hold_min);
-    nvs_set_i32(h, "max_sess", s->manual_session_max_min);
-    nvs_set_i32(h, "fan_post", s->fan_postrun_min);
-    nvs_set_i32(h, "temp_en", s->tempering_enabled ? 1 : 0);
-    nvs_set_i32(h, "temp_end", s->tempering_end_temp_c);
-    nvs_set_i32(h, "temp_min", s->tempering_duration_min);
-    nvs_set_i32(h, "auto_prof", s->auto_material_profile_enabled ? 1 : 0);
-    nvs_set_i32(h, "mat_warn", s->material_mismatch_warning_enabled ? 1 : 0);
-    nvs_set_i32(h, "antiwarp", s->anti_warp_enabled ? 1 : 0);
-    nvs_set_i32(h, "largeprt", s->large_print_protection_enabled ? 1 : 0);
-    nvs_set_i32(h, "night", s->safe_overnight_enabled ? 1 : 0);
-    nvs_set_i32(h, "pause_en", s->pause_hold_enabled ? 1 : 0);
-    nvs_set_i32(h, "pause_st", s->pause_hold_strategy);
-    nvs_set_i32(h, "pause_min", s->pause_hold_min);
-    nvs_set_i32(h, "pause_low", s->pause_lower_after_min);
-    nvs_set_i32(h, "pause_by", s->pause_lower_by_c);
-    nvs_set_i32(h, "pause_stop", s->pause_stop_after_min);
-    nvs_set_i32(h, "dryout_t", s->dryout_target_temp_c);
-    nvs_set_i32(h, "dryout_m", s->dryout_duration_min);
-    nvs_set_i32(h, "sched_t", s->scheduled_preheat_target_c);
-    nvs_set_i32(h, "sched_h", s->scheduled_preheat_hold_min);
-    nvs_set_i32(h, "finish", s->finish_conditioning_mode);
-    nvs_set_i32(h, "keep_t", s->keep_warm_temp_c);
-    nvs_set_i32(h, "keep_m", s->keep_warm_max_min);
-    nvs_set_i32(h, "door_en", s->door_sensor_enabled ? 1 : 0);
-    nvs_set_i32(h, "vdoor_en", s->virtual_door_detection_enabled ? 1 : 0);
-    nvs_set_i32(h, "vdoor_win", s->virtual_door_window_sec);
-    nvs_set_i32(h, "vdoor_drop", s->virtual_door_drop_c);
-    nvs_set_i32(h, "vdoor_rate", s->virtual_door_rate_c_per_min);
-    nvs_set_i32(h, "vdoor_min", s->virtual_door_min_base_temp_c);
-    nvs_set_i32(h, "vdoor_act", s->virtual_door_action);
-    nvs_set_i32(h, "health_t", s->health_test_target_c);
-    nvs_set_i32(h, "health_s", s->health_test_duration_sec);
-    nvs_set_i32(h, "warm_pred", s->warmup_prediction_enabled ? 1 : 0);
-    nvs_set_i32(h, "soak_en", s->heat_soak_enabled ? 1 : 0);
-    nvs_set_i32(h, "soak_min", s->heat_soak_min);
-    nvs_set_i32(h, "soak_band", s->heat_soak_band_c);
-    nvs_set_i32(h, "stab_lock", s->chamber_stability_lock_enabled ? 1 : 0);
-    nvs_set_i32(h, "filt_en", s->filter_life_counter_enabled ? 1 : 0);
-    nvs_set_i32(h, "filt_h", s->filter_life_limit_h);
-    nvs_set_i32(h, "wear_en", s->heater_wear_tracking_enabled ? 1 : 0);
-    nvs_set_i32(h, "wear_pct", s->heater_wear_warning_pct);
-    nvs_set_i32(h, "air_en", s->airflow_detection_enabled ? 1 : 0);
-    nvs_set_i32(h, "pla_en", s->pla_protection_enabled ? 1 : 0);
-    nvs_set_i32(h, "resume_en", s->smart_resume_enabled ? 1 : 0);
-    nvs_set_i32(h, "resume_m", s->resume_recover_min);
-    nvs_set_i32(h, "pickup", s->post_print_pickup_mode);
-    nvs_set_i32(h, "pickup_m", s->pickup_keep_warm_min);
-    nvs_set_i32(h, "risk_en", s->print_risk_enabled ? 1 : 0);
-    nvs_set_i32(h, "start_warn", s->start_print_warning_enabled ? 1 : 0);
-    nvs_set_i32(h, "recipes", s->local_recipes_enabled ? 1 : 0);
-    nvs_set_i32(h, "recipe", s->active_recipe_slot);
-    nvs_set_i32(h, "demo", s->demo_mode_enabled ? 1 : 0);
-    nvs_set_i32(h, "safety_en", s->safety_score_enabled ? 1 : 0);
-    nvs_set_i32(h, "setup_wiz", s->first_setup_wizard_enabled ? 1 : 0);
-    nvs_set_i32(h, "setup_step", s->first_setup_step);
-    nvs_set_i32(h, "setup_done", s->first_setup_complete ? 1 : 0);
-    nvs_set_i32(h, "hist_en", s->temp_history_enabled ? 1 : 0);
-    nvs_set_i32(h, "hist_sec", s->history_sample_period_sec);
-    nvs_set_i32(h, "inc_en", s->incident_report_enabled ? 1 : 0);
-    nvs_set_i32(h, "out_latch", s->output_safety_latch_enabled ? 1 : 0);
-    nvs_set_i32(h, "out_arm", s->output_safety_latch_armed ? 1 : 0);
-    nvs_set_i32(h, "h_verified", s->heater_output_verified ? 1 : 0);
-    nvs_set_i32(h, "f_verified", s->fan_output_verified ? 1 : 0);
-    nvs_set_i32(h, "noti_min", s->notification_min_level);
-    nvs_set_i32(h, "lang", s->language_code);
-    nvs_set_i32(h, "local", s->local_only_mode ? 1 : 0);
-    nvs_set_i32(h, "ota_en", s->ota_enabled ? 1 : 0);
-    nvs_set_i32(h, "showcase", s->contest_showcase_mode_enabled ? 1 : 0);
-    nvs_set_i32(h, "sym_en", s->symbiont_mode_enabled ? 1 : 0);
-    nvs_set_i32(h, "sym_vent", s->symbiont_ventilation_allowed ? 1 : 0);
-    nvs_set_i32(h, "sym_safe", s->symbiont_safe_control_enabled ? 1 : 0);
-    nvs_set_i32(h, "sym_policy", s->symbiont_policy);
-    err = nvs_commit(h);
+    if (err == ESP_OK) err = nvs_set_i32(h, "profile", s->material_profile);
+    if (err == ESP_OK) err = nvs_set_i32(h, "target", s->target_temp_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "filter", s->filter_trigger_bed_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "hotbed", s->heater_trigger_bed_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "ptc_cut", s->ptc_cutoff_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "dry_mode", s->drying_mode);
+    if (err == ESP_OK) err = nvs_set_i32(h, "custom_t", s->custom_temp_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "custom_h", s->custom_timer_h);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pre_t", s->preheat_target_temp_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pre_min", s->preheat_hold_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "max_sess", s->manual_session_max_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "fan_post", s->fan_postrun_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "temp_en", s->tempering_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "temp_end", s->tempering_end_temp_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "temp_min", s->tempering_duration_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "auto_prof", s->auto_material_profile_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "mat_warn", s->material_mismatch_warning_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "antiwarp", s->anti_warp_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "largeprt", s->large_print_protection_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "night", s->safe_overnight_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pause_en", s->pause_hold_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pause_st", s->pause_hold_strategy);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pause_min", s->pause_hold_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pause_low", s->pause_lower_after_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pause_by", s->pause_lower_by_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pause_stop", s->pause_stop_after_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "dryout_t", s->dryout_target_temp_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "dryout_m", s->dryout_duration_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "sched_t", s->scheduled_preheat_target_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "sched_h", s->scheduled_preheat_hold_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "finish", s->finish_conditioning_mode);
+    if (err == ESP_OK) err = nvs_set_i32(h, "keep_t", s->keep_warm_temp_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "keep_m", s->keep_warm_max_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "door_en", s->door_sensor_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "vdoor_en", s->virtual_door_detection_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "vdoor_win", s->virtual_door_window_sec);
+    if (err == ESP_OK) err = nvs_set_i32(h, "vdoor_drop", s->virtual_door_drop_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "vdoor_rate", s->virtual_door_rate_c_per_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "vdoor_min", s->virtual_door_min_base_temp_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "vdoor_act", s->virtual_door_action);
+    if (err == ESP_OK) err = nvs_set_i32(h, "health_t", s->health_test_target_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "health_s", s->health_test_duration_sec);
+    if (err == ESP_OK) err = nvs_set_i32(h, "warm_pred", s->warmup_prediction_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "soak_en", s->heat_soak_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "soak_min", s->heat_soak_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "soak_band", s->heat_soak_band_c);
+    if (err == ESP_OK) err = nvs_set_i32(h, "stab_lock", s->chamber_stability_lock_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "filt_en", s->filter_life_counter_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "filt_h", s->filter_life_limit_h);
+    if (err == ESP_OK) err = nvs_set_i32(h, "wear_en", s->heater_wear_tracking_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "wear_pct", s->heater_wear_warning_pct);
+    if (err == ESP_OK) err = nvs_set_i32(h, "air_en", s->airflow_detection_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pla_en", s->pla_protection_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "resume_en", s->smart_resume_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "resume_m", s->resume_recover_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pickup", s->post_print_pickup_mode);
+    if (err == ESP_OK) err = nvs_set_i32(h, "pickup_m", s->pickup_keep_warm_min);
+    if (err == ESP_OK) err = nvs_set_i32(h, "risk_en", s->print_risk_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "start_warn", s->start_print_warning_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "recipes", s->local_recipes_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "recipe", s->active_recipe_slot);
+    if (err == ESP_OK) err = nvs_set_i32(h, "safety_en", s->safety_score_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "setup_wiz", s->first_setup_wizard_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "setup_step", s->first_setup_step);
+    if (err == ESP_OK) err = nvs_set_i32(h, "setup_done", s->first_setup_complete ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "hist_en", s->temp_history_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "hist_sec", s->history_sample_period_sec);
+    if (err == ESP_OK) err = nvs_set_i32(h, "inc_en", s->incident_report_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "out_latch", s->output_safety_latch_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "out_arm", 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "h_verified", s->heater_output_verified ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "f_verified", s->fan_output_verified ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "noti_min", s->notification_min_level);
+    if (err == ESP_OK) err = nvs_set_i32(h, "lang", s->language_code);
+    if (err == ESP_OK) err = nvs_set_i32(h, "local", s->local_only_mode ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "ota_en", s->ota_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "showcase", s->contest_showcase_mode_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "sym_en", s->symbiont_mode_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "sym_vent", s->symbiont_ventilation_allowed ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "sym_safe", s->symbiont_safe_control_enabled ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_i32(h, "sym_policy", s->symbiont_policy);
+    if (err == ESP_OK) {
+        int cool_c = s->cool_release_c;
+        if (cool_c < 30) cool_c = 30;
+        if (cool_c > 65) cool_c = 65;
+        err = nvs_set_u32(h, "cool_rel_c", (uint32_t)cool_c * 100U);
+        if (err == ESP_OK) err = nvs_commit(h);
+    }
     nvs_close(h);
     if (err == ESP_OK) shu1_event_log_add("info", "settings_saved", "user settings saved to NVS");
     return err;
@@ -224,11 +278,11 @@ esp_err_t shu1_settings_store_load_device_config(shu1_device_config_t *cfg) {
     size_t len = sizeof(cfg->wifi_ssid);
     nvs_get_str(h, "ssid", cfg->wifi_ssid, &len);
     len = sizeof(cfg->wifi_password);
-    nvs_get_str(h, "wpass", cfg->wifi_password, &len);
+    nvs_get_str(h, "password", cfg->wifi_password, &len);
     len = sizeof(cfg->moonraker_host);
-    nvs_get_str(h, "moon_host", cfg->moonraker_host, &len);
-    int32_t port = cfg->moonraker_port;
-    if (nvs_get_i32(h, "moon_port", &port) == ESP_OK) cfg->moonraker_port = port;
+    nvs_get_str(h, "mk_host", cfg->moonraker_host, &len);
+    uint16_t port = (uint16_t)cfg->moonraker_port;
+    if (nvs_get_u16(h, "mk_port", &port) == ESP_OK) cfg->moonraker_port = port;
     nvs_close(h);
     return ESP_OK;
 }
@@ -238,23 +292,55 @@ esp_err_t shu1_settings_store_save_device_config(const shu1_device_config_t *cfg
     nvs_handle_t h;
     esp_err_t err = open_rw(&h);
     if (err != ESP_OK) return err;
-    nvs_set_str(h, "ssid", cfg->wifi_ssid);
-    nvs_set_str(h, "wpass", cfg->wifi_password);
-    nvs_set_str(h, "moon_host", cfg->moonraker_host);
-    nvs_set_i32(h, "moon_port", cfg->moonraker_port);
-    err = nvs_commit(h);
+    if (err == ESP_OK) err = nvs_set_str(h, "ssid", cfg->wifi_ssid);
+    if (err == ESP_OK) err = nvs_set_str(h, "password", cfg->wifi_password);
+    if (err == ESP_OK) err = nvs_set_str(h, "mk_host", cfg->moonraker_host);
+    if (err == ESP_OK) err = nvs_set_u16(h, "mk_port", (uint16_t)cfg->moonraker_port);
+    if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err == ESP_OK) shu1_event_log_add("warn", "device_config_saved", "Wi-Fi/Moonraker config saved; reboot may be required");
     return err;
 }
 
-esp_err_t shu1_settings_store_factory_reset(void) {
+esp_err_t shu1_settings_store_set_control_token(const char *token) {
+    if (!token || strlen(token) < 16 || strlen(token) > 64) return ESP_ERR_INVALID_ARG;
     nvs_handle_t h;
     esp_err_t err = open_rw(&h);
     if (err != ESP_OK) return err;
-    err = nvs_erase_all(h);
+    err = nvs_set_str(h, "ctl_token", token);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
-    if (err == ESP_OK) shu1_event_log_add("warn", "factory_reset", "NVS configuration erased");
+    return err;
+}
+
+static void reset_restart_task(void *arg) {
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(1200));
+    esp_restart();
+}
+
+esp_err_t shu1_settings_store_factory_reset(void) {
+    SHU1_CONTROL_GUARD(guard);
+    if (!shu1_control_maintenance_begin()) return ESP_ERR_INVALID_STATE;
+    nvs_handle_t h;
+    esp_err_t err = open_rw(&h);
+    if (err == ESP_OK) {
+        // Preserve fault_latch/fault_code, NTC calibration and REST credential.
+        // Never erase the whole shared stock NVS partition or namespace.
+        static const char *keys[] = {
+            "profile", "target", "filter", "hotbed", "ptc_cut", "dry_mode", "custom_t", "custom_h", "pre_t", "pre_min", "max_sess", "fan_post", "temp_en", "temp_end", "temp_min", "auto_prof", "mat_warn", "antiwarp", "largeprt", "night", "pause_en", "pause_st", "pause_min", "pause_low", "pause_by", "pause_stop", "dryout_t", "dryout_m", "sched_t", "sched_h", "finish", "keep_t", "keep_m", "door_en", "vdoor_en", "vdoor_win", "vdoor_drop", "vdoor_rate", "vdoor_min", "vdoor_act", "health_t", "health_s", "warm_pred", "soak_en", "soak_min", "soak_band", "stab_lock", "filt_en", "filt_h", "wear_en", "wear_pct", "air_en", "pla_en", "resume_en", "resume_m", "pickup", "pickup_m", "risk_en", "start_warn", "recipes", "recipe", "safety_en", "setup_wiz", "setup_step", "setup_done", "hist_en", "hist_sec", "inc_en", "out_latch", "out_arm", "h_verified", "f_verified", "noti_min", "lang", "local", "ota_en", "showcase", "sym_en", "sym_vent", "sym_safe", "sym_policy", "cool_rel_c", "ssid", "password", "mk_host", "mk_port"
+        };
+        for (size_t i = 0; err == ESP_OK && i < sizeof(keys) / sizeof(keys[0]); ++i) {
+            err = nvs_erase_key(h, keys[i]);
+            if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+        }
+        if (err == ESP_OK) err = nvs_commit(h);
+        nvs_close(h);
+    }
+    // A partial failure stays inhibited, but does not unexpectedly reboot.
+    if (err != ESP_OK) return err;
+    // Successful reset remains in maintenance until restart.
+    if (xTaskCreate(reset_restart_task, "shu1_reset", 2048, NULL, 5, NULL) != pdPASS)
+        return ESP_ERR_NO_MEM; // stays inhibited; explicit power cycle required
     return err;
 }

@@ -15,4 +15,5 @@ object SnapHeaterBleContract {
     val DiagnosticsCharacteristicUuid: UUID = UUID.fromString("7b2f1003-4a6f-4c2d-9a1e-2f4f53485531")
 
     const val DeviceName = "SnapHeater U1"
+    const val ShortDeviceName = "SH-U1"
 }

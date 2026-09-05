@@ -10,18 +10,18 @@
  * SnapHeater U1 - Panda Breath board map
  *
  * This file is the single human-readable place for the accepted Panda Breath
- * hardware pin map used by SnapHeater U1. Values are intentionally routed
- * through Kconfig so they can be changed from `idf.py menuconfig` without
- * touching feature code.
+ * hardware pin map used by SnapHeater U1. Kconfig may disable optional pins;
+ * panda_hardware_guard.h rejects remapping onto another circuit. The local
+ * fan driver uses this checked stock configuration.
  *
  * Safety policy:
- * - Normal heater output is build-enabled for the accepted Panda Breath map.
+ * - Normal heater output remains build-disabled in the public defaults.
  * - Runtime safety checks and the Output Safety Latch still guard heating.
  * - GPIO7 is the zero-cross detector net and must not be configured as a
  *   generic button.
  * - GPIO0/GPIO1 are ADC sensor inputs and should not be reused as buttons.
- * - Physical button semantics are disabled by default until the exact K1/K2/K3
- *   behavior is handled in firmware.
+ * - GPIO9/GPIO8/GPIO2 are strapping pins. A button held during boot is ignored
+ *   until it has first been released.
  * - This header is a project organization layer. It does not replace safe
  *   bench testing before energizing a 300 W heater.
  */
@@ -46,10 +46,10 @@
 // -----------------------------------------------------------------------------
 // Panda Breath-style physical buttons
 // -----------------------------------------------------------------------------
-#define SHU1_BOARD_BUTTON_AUTO_GPIO         CONFIG_SHU1_BUTTON_AUTO_GPIO
-#define SHU1_BOARD_BUTTON_ON_GPIO           CONFIG_SHU1_BUTTON_ON_GPIO
-#define SHU1_BOARD_BUTTON_OFF_GPIO          CONFIG_SHU1_BUTTON_OFF_GPIO
-#define SHU1_BOARD_BUTTON_GENERIC_GPIO      CONFIG_SHU1_BUTTON_GENERIC_GPIO
+#define SHU1_BOARD_BUTTON_POWER_GPIO        CONFIG_SHU1_BUTTON_POWER_GPIO // GPIO9, strap
+#define SHU1_BOARD_BUTTON_AUTO_GPIO         CONFIG_SHU1_BUTTON_AUTO_GPIO  // GPIO8, strap
+#define SHU1_BOARD_BUTTON_ON_GPIO           CONFIG_SHU1_BUTTON_ON_GPIO    // GPIO10
+#define SHU1_BOARD_BUTTON_DRY_GPIO          CONFIG_SHU1_BUTTON_DRY_GPIO   // GPIO2, strap
 
 #define SHU1_BOARD_BUTTON_ACTIVE_LOW        CONFIG_SHU1_BUTTON_ACTIVE_LOW
 
@@ -58,20 +58,18 @@
 // -----------------------------------------------------------------------------
 #define SHU1_BOARD_LED_AUTO_GPIO            CONFIG_SHU1_LED_AUTO_GPIO
 #define SHU1_BOARD_LED_ON_GPIO              CONFIG_SHU1_LED_ON_GPIO
-#define SHU1_BOARD_LED_OFF_GPIO             CONFIG_SHU1_LED_OFF_GPIO
-#define SHU1_BOARD_LED_ERROR_GPIO           CONFIG_SHU1_LED_ERROR_GPIO
-#define SHU1_BOARD_LED_WIFI_GPIO            CONFIG_SHU1_LED_WIFI_GPIO
-#define SHU1_BOARD_LED_BLE_GPIO             CONFIG_SHU1_LED_BLE_GPIO
+#define SHU1_BOARD_LED_DRY_GPIO             CONFIG_SHU1_LED_DRY_GPIO
+#define SHU1_BOARD_LED_POWER_GPIO           CONFIG_SHU1_LED_POWER_GPIO
 
 #define SHU1_BOARD_LED_ACTIVE_HIGH          CONFIG_SHU1_LED_ACTIVE_HIGH
 
 // -----------------------------------------------------------------------------
 // Pin map status notes
 // -----------------------------------------------------------------------------
-#define SHU1_BOARD_PIN_STATUS_HEATER        "accepted_panda_breath_map"
-#define SHU1_BOARD_PIN_STATUS_FAN           "accepted_panda_breath_map"
-#define SHU1_BOARD_PIN_STATUS_ZERO_CROSS    "accepted_panda_breath_map"
-#define SHU1_BOARD_PIN_STATUS_CHAMBER_ADC   "accepted_panda_breath_map"
-#define SHU1_BOARD_PIN_STATUS_PTC_ADC       "accepted_panda_breath_map"
-#define SHU1_BOARD_PIN_STATUS_BUTTONS       "disabled_until_button_semantics_are_supported"
+#define SHU1_BOARD_PIN_STATUS_HEATER        "dragonbreath_inferred_continuity_required"
+#define SHU1_BOARD_PIN_STATUS_FAN           "dragonbreath_confirmed"
+#define SHU1_BOARD_PIN_STATUS_ZERO_CROSS    "dragonbreath_confirmed"
+#define SHU1_BOARD_PIN_STATUS_CHAMBER_ADC   "dragonbreath_inferred_continuity_required"
+#define SHU1_BOARD_PIN_STATUS_PTC_ADC       "dragonbreath_inferred_continuity_required"
+#define SHU1_BOARD_PIN_STATUS_BUTTONS       "dragonbreath_map_optional_default_off"
 #define SHU1_BOARD_PIN_STATUS_LEDS          "accepted_panda_breath_map_optional_feedback"
