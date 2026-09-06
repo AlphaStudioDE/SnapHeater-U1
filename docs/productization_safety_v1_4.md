@@ -1,5 +1,10 @@
 # SnapHeater U1 v1.4 Productization & Safety Pack
 
+> 2026-09-06: Anti-Warp, Large Print Protection, Safe Overnight, recipes and
+> Showcase metadata and legacy Smart Resume have been retired. Their descriptions/payload examples below
+> are historical, not supported controls. See [Current implementation](CURRENT_IMPLEMENTATION.md)
+> and [pause/history update](LOCAL_HISTORY_PAUSE_UPDATE.md) for current behavior.
+
 This release adds the final productization layer before first hardware build tests.
 
 ## Implemented items

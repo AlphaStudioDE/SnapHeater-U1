@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+// No synchronous log sink while holding the shared control-policy guard.
+#define LOG_LOCAL_LEVEL ESP_LOG_NONE
 #include "physical_controls.h"
 #include "app_config.h"
 #include "settings_store.h"
@@ -111,7 +113,6 @@ static void stop_all_user_cycles(bool emergency) {
     st.scheduled_preheat_enabled = false;
     st.keep_warm_active = false;
     st.pickup_active = false;
-    st.resume_recover_active = false;
     st.tempering_phase = SHU1_TEMPERING_IDLE;
     st.preheat_phase = SHU1_PREHEAT_IDLE;
     st.heat_soak_phase = SHU1_HEAT_SOAK_IDLE;
@@ -145,6 +146,7 @@ static void start_auto_mode(void) {
     (void)shu1_control_claim(SHU1_CONTROL_PHYSICAL, true,
                              SHU1_CONTROL_REVISION_ANY, NULL);
     shu1_settings_t st = shu1_state_get_settings();
+    shu1_settings_stop(&st);
     st.scheduled_preheat_enabled = false;
     st.scheduled_preheat_start_ms = 0;
     st.work_mode = SHU1_MODE_AUTO;
@@ -161,6 +163,7 @@ static void start_dry_mode(void) {
     (void)shu1_control_claim(SHU1_CONTROL_PHYSICAL, true,
                              SHU1_CONTROL_REVISION_ANY, NULL);
     shu1_settings_t st = shu1_state_get_settings();
+    shu1_settings_stop(&st);
     st.scheduled_preheat_enabled = false;
     st.scheduled_preheat_start_ms = 0;
     st.work_mode = SHU1_MODE_DRYING;
@@ -168,7 +171,11 @@ static void start_dry_mode(void) {
     int hours = st.drying_mode == SHU1_DRYING_CUSTOM ? st.custom_timer_h : 12;
     if (hours < 1) hours = 1;
     if (hours > 12) hours = 12;
-    st.drying_end_ms = esp_timer_get_time() / 1000 + (int64_t)hours * 3600000;
+    int minutes=hours*60;
+    int limit=st.manual_session_max_min;
+    if (limit<1 || limit>720) limit=720;
+    if (minutes>limit) minutes=limit;
+    st.drying_end_ms = esp_timer_get_time() / 1000 + (int64_t)minutes * 60000;
     st.work_on = true;
     if (st.session_started_ms == 0) st.session_started_ms = esp_timer_get_time() / 1000;
     shu1_state_update_settings_command(&st);
@@ -182,6 +189,7 @@ static void start_manual_mode(void) {
     (void)shu1_control_claim(SHU1_CONTROL_PHYSICAL, true,
                              SHU1_CONTROL_REVISION_ANY, NULL);
     shu1_settings_t st = shu1_state_get_settings();
+    shu1_settings_stop(&st);
     st.scheduled_preheat_enabled = false;
     st.scheduled_preheat_start_ms = 0;
     st.work_mode = SHU1_MODE_POWER_ON;

@@ -93,7 +93,9 @@ class DailyUiTests(unittest.TestCase):
         wizard = (UI / "screens/PrinterSetupScreen.kt").read_text(encoding="utf-8")
         wifi = (UI / "screens/WifiSetupScreen.kt").read_text(encoding="utf-8")
         self.assertIn('var password by remember { mutableStateOf("") }', wifi)
-        self.assertIn("ready && !saved && !busy", wizard)
+        self.assertIn("ready && !busy", wizard)
+        self.assertIn('var apiKey by remember { mutableStateOf("") }', wizard)
+        self.assertIn("connectionHealthy && snapshot.printerDataReady", app)
         for locale in ("values", "values-pl", "values-de"):
             keys = {s.attrib.get("name") for s in ET.parse(APP / f"res/{locale}/strings.xml").getroot()}
             self.assertTrue({"wizard_skip", "wizard_restart", "wizard_printer", "wizard_modes_locked"} <= keys)
@@ -184,7 +186,7 @@ class DailyUiTests(unittest.TestCase):
 
     def test_three_primary_destinations_and_global_stop(self):
         text = (UI / "SnapHeaterApp.kt").read_text(encoding="utf-8")
-        self.assertIn("listOf(AppTab.Dashboard, AppTab.Modes, AppTab.Settings)", text)
+        self.assertIn("listOf(AppTab.Dashboard, AppTab.Modes, AppTab.History, AppTab.Settings)", text)
         self.assertIn("TextButton(onClick = onSafeStop)", text)
 
     def test_dashboard_has_no_safety_percentage(self):

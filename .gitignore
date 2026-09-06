@@ -6,7 +6,6 @@ sdkconfig.old
 sdkconfig.tester*
 sdkconfig.compile-test*
 managed_components/
-dependencies.lock
 
 # Android / Gradle
 .gradle/

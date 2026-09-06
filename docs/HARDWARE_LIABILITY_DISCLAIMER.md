@@ -1,5 +1,13 @@
 # Hardware liability disclaimer
 
+> **0.9.9 is an experimental testing prerelease, not stable.** Testers use it at
+> their own risk and must continuously supervise the device, stop abnormal
+> operation and report problems until a stable, qualified release is explicitly
+> announced. Authors and contributors disclaim liability for damage to the
+> extent permitted by applicable law. No notice waives rights or responsibilities
+> that cannot legally be excluded. Software safeguards and successful tests are
+> not a certification or guarantee; never leave this prerelease unattended.
+
 SnapHeater U1 is custom firmware and reference documentation for heater-related hardware. Heater devices can cause fire, burns, electrical damage, printer damage or other property damage if they are wired, configured, mounted or operated incorrectly.
 
 By building, flashing, modifying, connecting or using SnapHeater U1 with Panda Breath-style hardware or DIY heater hardware, you accept full responsibility for your own device, wiring, parts selection, installation, safety protections, testing and operation.

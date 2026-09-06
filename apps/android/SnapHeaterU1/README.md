@@ -1,45 +1,30 @@
-# SnapHeater U1 Android App
+# SnapHeater U1 Android — 0.9.9
 
-Android/iOS-oriented companion app shell for SnapHeater U1.
+Native Kotlin/Jetpack Compose companion for SnapHeater firmware on original Panda
+Breath electronics. Android 8.0+ (API 26), BLE and authenticated LAN REST.
+English, Polish and German resources are included.
 
-Current status: SnapScreen-like UI connected to the SnapHeater BLE/REST contract.
-The firmware target is original Panda Breath electronics using the recovered
-DragonBreath-derived hardware layer.
+The app provides a connection wizard, saved heaters, task-oriented controls,
+pause/stop, temperature charts, event history, CSV/report export and LAN OTA.
+Printer monitoring and job execution run on Panda, not on the phone.
 
-## Scope
+Download the sideloadable debug/testing APK from
+[release v0.9.9](https://github.com/AlphaStudioDE/SnapHeater-U1/releases/tag/v0.9.9).
+It is not a production-signed or Play Store build. Keep the installed app's data:
+do not uninstall to resolve a signature mismatch without first exporting history.
 
-- Scan and connect to devices running SnapHeater firmware.
-- Use the SnapHeater BLE and authenticated REST command contracts.
-- Dashboard for chamber, target, heater/fan and connectivity status exposed by SnapHeater firmware.
-- SnapHeater workflows guarded by firmware leases, revisions and safety interlocks.
-- Snapmaker U1 / Moonraker-aware automation from the app layer, read-only first.
-- Diagnostics view for connection, Panda hardware mapping and app-side events.
-- Settings view for material, temperature limits, tempering duration and local-only mode.
-- EN primary UI direction with PL and DE localization resources started.
+## Build
 
-## Project Structure
+Open this directory in Android Studio with JDK 17 and Android SDK 35.
 
-- `app/src/main/java/.../model`: UI state models.
-- `app/src/main/java/.../data`: app repositories for BLE and REST sources; no demo repository.
-- `app/src/main/java/.../ble`: BLE scanner/client for the SnapHeater service.
-- `app/src/main/java/.../ui`: Compose app shell, screens, components and theme.
-- `docs/UI_FLOW.md`: mobile UX flow and safety boundary.
-- `docs/FIRMWARE_APP_MAP.md`: mapping between firmware features and Android UI coverage.
-
-## Open In Android Studio
-
-Open this folder:
-
-```text
-apps/android/SnapHeaterU1
+```powershell
+.\gradlew.bat assembleDebug testDebugUnitTest lintDebug
 ```
 
-Then let Android Studio sync Gradle.
+Normal authenticated mode activation needs no separate manual arm step.
+Firmware interlocks remain authoritative. Background notifications are best effort.
+See [installation](../../../docs/INSTALL_0.9.9.md) and
+[testing risk notice](../../../docs/HARDWARE_LIABILITY_DISCLAIMER.md).
 
-Build setup notes are in [docs/BUILD_SETUP.md](docs/BUILD_SETUP.md).
-
-## Safety Boundary
-
-Physical output actions remain hidden or disabled until the SnapHeater firmware
-reports valid sensors, a verified zero-cross/fan path and an explicitly armed
-Output Safety Latch. The app cannot override firmware interlocks.
+The visual preview is isolated from physical transports. Preview screens are
+not evidence of a real connected heater or successful hardware tests.

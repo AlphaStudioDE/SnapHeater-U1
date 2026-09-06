@@ -5,12 +5,17 @@
  */
 
 #include "api_server.h"
+#include "recorder.h"
 #include <math.h>
 #include "app_config.h"
 #include "app_state.h"
 #include "profiles.h"
 #include "settings_store.h"
+#include "settings_deferred.h"
 #include "command_validation.h"
+#include "ota_integrity.h"
+#include "ota_storage.h"
+#include "json_guard.h"
 #include "job_commands.h"
 #include "event_log.h"
 #include "heater.h"
@@ -24,6 +29,7 @@
 #include "esp_check.h"
 #include "esp_timer.h"
 #include "wifi_sta.h"
+#include "moonraker_client.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
@@ -35,6 +41,47 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "lwip/sockets.h"
+
+// One request per connection: no unbounded SDK drain after an early return.
+// The socket timeout bounds a single recv; this deadline bounds slow headers too.
+typedef struct { int64_t deadline_us; } api_receive_budget_t;
+
+static int api_bounded_recv(httpd_handle_t server, int fd, char *buf, size_t len, int flags) {
+    api_receive_budget_t *budget = httpd_sess_get_transport_ctx(server, fd);
+    if (!budget || esp_timer_get_time() >= budget->deadline_us)
+        return HTTPD_SOCK_ERR_FAIL;
+    int received = recv(fd, buf, len, flags);
+    if (received <= 0 || esp_timer_get_time() >= budget->deadline_us)
+        return HTTPD_SOCK_ERR_FAIL;
+    return received;
+}
+
+static esp_err_t api_connection_open(httpd_handle_t server, int fd) {
+    api_receive_budget_t *budget = calloc(1, sizeof(*budget));
+    if (!budget) return ESP_ERR_NO_MEM;
+    budget->deadline_us = esp_timer_get_time() + 2000000;
+    httpd_sess_set_transport_ctx(server, fd, budget, free);
+    return httpd_sess_set_recv_override(server, fd, api_bounded_recv);
+}
+
+static esp_err_t api_guarded_handler(httpd_req_t *req) {
+    const httpd_uri_t *route = req->user_ctx;
+    api_receive_budget_t *budget = httpd_sess_get_transport_ctx(req->handle, httpd_req_to_sockfd(req));
+    httpd_resp_set_hdr(req, "Connection", "close");
+    if (!budget || esp_timer_get_time() >= budget->deadline_us) return ESP_FAIL;
+    const bool upload = strcmp(route->uri, "/update") == 0 || strcmp(route->uri, "/api/v2/update") == 0;
+    const bool bodyless = route->method == HTTP_GET || strcmp(route->uri, "/api/v2/boot-inactive") == 0;
+    if (bodyless && req->content_len != 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":\"unexpected_body\"}");
+        return ESP_FAIL;
+    }
+    budget->deadline_us = esp_timer_get_time() + (upload ? 60000000 : 2000000);
+    (void)route->handler(req);
+    // ESP_FAIL closes the session without httpd_req_delete draining unread data.
+    return ESP_FAIL;
+}
 
 static const char *TAG = "shu1_api";
 #define SHU1_AUTH_HEADER "X-DragonBreath-Auth"
@@ -149,6 +196,7 @@ static void add_ota_info(cJSON *parent) {
     const esp_partition_t *running = esp_ota_get_running_partition();
     const esp_partition_t *boot = esp_ota_get_boot_partition();
     const esp_partition_t *inactive = esp_ota_get_next_update_partition(NULL);
+    cJSON_AddNumberToObject(root, "inactive_capacity", inactive ? inactive->size : 0);
     if (running) cJSON_AddStringToObject(root, "running_slot", running->label);
     if (boot) cJSON_AddStringToObject(root, "boot_slot", boot->label);
     esp_ota_img_states_t image_state;
@@ -172,6 +220,17 @@ static cJSON *state_to_json(void) {
     shu1_state_get(&st);
     cJSON *root = cJSON_CreateObject();
     if (root) shu1_wifi_status_json(root);
+    cJSON_AddStringToObject(root,"fault_clear_block_reason",shu1_safety_latch_clear_block_reason(&st.settings,&st.runtime));
+    cJSON_AddBoolToObject(root,"fault_clear_supported",true);
+    cJSON_AddBoolToObject(root,"fault_latched",shu1_safety_latch_is_set());
+    cJSON_AddBoolToObject(root,"fault_inhibited",shu1_safety_latch_is_inhibited());
+    cJSON_AddStringToObject(root,"fault_reason",shu1_heater_fault_str(shu1_safety_latch_fault()));
+    bool pending, persist_ok;
+    shu1_settings_deferred_status(&pending, &persist_ok);
+    cJSON_AddBoolToObject(root, "settings_pending", pending);
+    cJSON_AddBoolToObject(root, "settings_persist_ok", persist_ok);
+    shu1_recorder_usage(root);
+    shu1_moonraker_setup_status(root);
     cJSON_AddStringToObject(root, "fw_name", SHU1_FW_NAME);
     cJSON_AddStringToObject(root, "fw_version", SHU1_FW_VERSION);
     cJSON_AddBoolToObject(root, "heater_output_build_enabled", CONFIG_SHU1_ENABLE_HEATER_OUTPUT);
@@ -192,6 +251,7 @@ static cJSON *state_to_json(void) {
 
     cJSON *settings = cJSON_AddObjectToObject(root, "settings");
     cJSON_AddBoolToObject(settings, "work_on", st.settings.work_on);
+    cJSON_AddBoolToObject(settings, "paused", st.settings.user_paused);
     cJSON_AddNumberToObject(settings, "material_profile", st.settings.material_profile);
     cJSON_AddStringToObject(settings, "material_profile_name", shu1_profile_name(st.settings.material_profile));
     cJSON_AddNumberToObject(settings, "work_mode", st.settings.work_mode);
@@ -204,9 +264,10 @@ static cJSON *state_to_json(void) {
     cJSON_AddNumberToObject(settings, "custom_temp", st.settings.custom_temp_c);
     cJSON_AddNumberToObject(settings, "custom_timer", st.settings.custom_timer_h);
     int64_t now_ms = esp_timer_get_time() / 1000;
-    int64_t remaining_s = (st.settings.drying_end_ms > now_ms) ? (st.settings.drying_end_ms - now_ms) / 1000 : 0;
+    const int64_t job_now_ms=st.settings.user_paused ? st.settings.user_pause_started_ms : now_ms;
+    int64_t remaining_s = (st.settings.drying_end_ms > job_now_ms) ? (st.settings.drying_end_ms - job_now_ms) / 1000 : 0;
     cJSON_AddNumberToObject(settings, "remaining_seconds", (double)remaining_s);
-    int64_t preheat_remaining_s = (st.settings.preheat_end_ms > now_ms) ? (st.settings.preheat_end_ms - now_ms) / 1000 : 0;
+    int64_t preheat_remaining_s = (st.settings.preheat_end_ms > job_now_ms) ? (st.settings.preheat_end_ms - job_now_ms) / 1000 : 0;
     cJSON_AddBoolToObject(settings, "preheat_running", st.settings.preheat_running);
     cJSON_AddNumberToObject(settings, "preheat_target", st.settings.preheat_target_temp_c);
     cJSON_AddNumberToObject(settings, "preheat_hold_min", st.settings.preheat_hold_min);
@@ -224,10 +285,10 @@ static cJSON *state_to_json(void) {
     cJSON_AddNumberToObject(settings, "tempering_phase", st.settings.tempering_phase);
     cJSON_AddNumberToObject(settings, "tempering_start_temp", st.settings.tempering_start_temp_c);
     cJSON_AddNumberToObject(settings, "tempering_current_target", st.settings.tempering_current_target_c);
-    int64_t tempering_remaining_s = (st.settings.tempering_end_ms > now_ms) ? (st.settings.tempering_end_ms - now_ms) / 1000 : 0;
+    int64_t tempering_remaining_s = (st.settings.tempering_end_ms > job_now_ms) ? (st.settings.tempering_end_ms - job_now_ms) / 1000 : 0;
     int tempering_progress_pct = 0;
     if (st.settings.tempering_phase == SHU1_TEMPERING_ACTIVE && st.settings.tempering_end_ms > st.settings.tempering_start_ms) {
-        int64_t elapsed = now_ms - st.settings.tempering_start_ms;
+        int64_t elapsed = job_now_ms - st.settings.tempering_start_ms;
         int64_t total = st.settings.tempering_end_ms - st.settings.tempering_start_ms;
         if (elapsed < 0) elapsed = 0;
         if (elapsed > total) elapsed = total;
@@ -247,9 +308,6 @@ static cJSON *state_to_json(void) {
     cJSON_AddNumberToObject(settings, "material_mismatch_printer_profile", st.settings.material_mismatch_printer_profile);
     cJSON_AddStringToObject(settings, "material_mismatch_printer_profile_name", shu1_profile_name(st.settings.material_mismatch_printer_profile));
     cJSON_AddNumberToObject(settings, "material_mismatch_detected_ms", (double)st.settings.material_mismatch_detected_ms);
-    cJSON_AddBoolToObject(settings, "anti_warp_enabled", st.settings.anti_warp_enabled);
-    cJSON_AddBoolToObject(settings, "large_print_protection_enabled", st.settings.large_print_protection_enabled);
-    cJSON_AddBoolToObject(settings, "safe_overnight_enabled", st.settings.safe_overnight_enabled);
     cJSON_AddBoolToObject(settings, "pause_hold_enabled", st.settings.pause_hold_enabled);
     cJSON_AddNumberToObject(settings, "pause_hold_strategy", st.settings.pause_hold_strategy);
     cJSON_AddNumberToObject(settings, "pause_hold_min", st.settings.pause_hold_min);
@@ -259,7 +317,7 @@ static cJSON *state_to_json(void) {
     cJSON_AddBoolToObject(settings, "dryout_running", st.settings.dryout_running);
     cJSON_AddNumberToObject(settings, "dryout_target", st.settings.dryout_target_temp_c);
     cJSON_AddNumberToObject(settings, "dryout_duration_min", st.settings.dryout_duration_min);
-    int64_t dryout_remaining_s = (st.settings.dryout_end_ms > now_ms) ? (st.settings.dryout_end_ms - now_ms) / 1000 : 0;
+    int64_t dryout_remaining_s = (st.settings.dryout_end_ms > job_now_ms) ? (st.settings.dryout_end_ms - job_now_ms) / 1000 : 0;
     cJSON_AddNumberToObject(settings, "dryout_remaining_seconds", (double)dryout_remaining_s);
     cJSON_AddBoolToObject(settings, "dryout_complete_pending", st.settings.dryout_complete_pending);
     cJSON_AddBoolToObject(settings, "scheduled_preheat_enabled", st.settings.scheduled_preheat_enabled);
@@ -311,9 +369,6 @@ static cJSON *state_to_json(void) {
     cJSON_AddBoolToObject(settings, "pla_protection_enabled", st.settings.pla_protection_enabled);
     cJSON_AddBoolToObject(settings, "pla_protection_confirmed", st.settings.pla_protection_confirmed);
     cJSON_AddBoolToObject(settings, "pla_protection_pending", st.settings.pla_protection_pending);
-    cJSON_AddBoolToObject(settings, "smart_resume_enabled", st.settings.smart_resume_enabled);
-    cJSON_AddNumberToObject(settings, "resume_recover_min", st.settings.resume_recover_min);
-    cJSON_AddBoolToObject(settings, "resume_recover_active", st.settings.resume_recover_active);
     cJSON_AddNumberToObject(settings, "post_print_pickup_mode", st.settings.post_print_pickup_mode);
     cJSON_AddNumberToObject(settings, "pickup_keep_warm_min", st.settings.pickup_keep_warm_min);
     cJSON_AddBoolToObject(settings, "pickup_active", st.settings.pickup_active);
@@ -323,9 +378,6 @@ static cJSON *state_to_json(void) {
     cJSON_AddBoolToObject(settings, "print_risk_warning_pending", st.settings.print_risk_warning_pending);
     cJSON_AddBoolToObject(settings, "start_print_warning_enabled", st.settings.start_print_warning_enabled);
     cJSON_AddBoolToObject(settings, "start_print_warning_pending", st.settings.start_print_warning_pending);
-    cJSON_AddBoolToObject(settings, "local_recipes_enabled", st.settings.local_recipes_enabled);
-    cJSON_AddNumberToObject(settings, "active_recipe_slot", st.settings.active_recipe_slot);
-    cJSON_AddStringToObject(settings, "active_recipe_name", st.settings.active_recipe_name);
     cJSON_AddBoolToObject(settings, "safety_score_enabled", st.settings.safety_score_enabled);
     cJSON_AddNumberToObject(settings, "safety_score", st.settings.safety_score);
     cJSON_AddBoolToObject(settings, "setup_validation_passed", st.settings.setup_validation_passed);
@@ -350,7 +402,6 @@ static cJSON *state_to_json(void) {
     cJSON_AddBoolToObject(settings, "local_only_mode", st.settings.local_only_mode);
     cJSON_AddBoolToObject(settings, "ota_enabled", st.settings.ota_enabled);
     cJSON_AddNumberToObject(settings, "ota_status", st.settings.ota_status);
-    cJSON_AddBoolToObject(settings, "contest_showcase_mode_enabled", st.settings.contest_showcase_mode_enabled);
     cJSON_AddBoolToObject(settings, "symbiont_mode_enabled", st.settings.symbiont_mode_enabled);
     cJSON_AddBoolToObject(settings, "symbiont_ventilation_allowed", st.settings.symbiont_ventilation_allowed);
     cJSON_AddBoolToObject(settings, "symbiont_safe_control_enabled", st.settings.symbiont_safe_control_enabled);
@@ -380,6 +431,8 @@ static cJSON *state_to_json(void) {
         st.runtime.heater_constraint[0] ? st.runtime.heater_constraint : "off");
     cJSON_AddBoolToObject(runtime, "fan_output_on", st.runtime.fan_output_on);
     cJSON_AddStringToObject(runtime, "ptc_heater_status", shu1_heater_fault_str(st.runtime.heater_fault));
+    cJSON_AddNumberToObject(runtime, "sensor_freeze_warning_ms", (double)st.runtime.sensor_freeze_warning_ms);
+    cJSON_AddNumberToObject(runtime, "sensor_freeze_remaining_s", st.runtime.sensor_freeze_remaining_s);
     cJSON_AddNumberToObject(runtime, "last_sensor_ms", (double)st.runtime.last_sensor_ms);
     cJSON_AddBoolToObject(runtime, "rise_detect_active", st.runtime.rise_detector.active);
     cJSON_AddNumberToObject(runtime, "rise_detect_start_ptc", st.runtime.rise_detector.start_ptc_c);
@@ -492,7 +545,7 @@ static bool json_bool(cJSON *root, const char *name, bool current) {
 
 static bool has_energy_control_field(cJSON *root) {
     static const char *const fields[] = {
-        "work_on", "work_mode", "set_temp", "safe_stop", "emergency_stop",
+        "work_on", "work_mode", "set_temp", "safe_stop", "emergency_stop", "pause_job",
         "isrunning", "preheat_running", "dryout_running", "health_test_running",
         "scheduled_preheat_enabled", "keep_warm_active", "pickup_active",
         "tempering_enabled", "clear_heater_fault"
@@ -541,6 +594,8 @@ static esp_err_t send_control_rejection(httpd_req_t *req, shu1_control_result_t 
 }
 
 static void apply_safe_stop(shu1_settings_t *st) {
+    st->user_paused = false;
+    st->user_pause_started_ms = 0;
     st->work_on = false;
     st->drying_running = false;
     st->drying_end_ms = 0;
@@ -569,7 +624,6 @@ static void apply_safe_stop(shu1_settings_t *st) {
     st->keep_warm_end_ms = 0;
     st->pickup_active = false;
     st->pickup_pending = false;
-    st->resume_recover_active = false;
     st->session_started_ms = 0;
     st->output_safety_latch_armed = false;
     st->work_mode = SHU1_MODE_AUTO;
@@ -582,15 +636,17 @@ static esp_err_t read_json_body(httpd_req_t *req, cJSON **out) {
     char *buf = calloc(1, len + 1);
     if (!buf) return ESP_ERR_NO_MEM;
     int received = 0;
+    const int64_t deadline=esp_timer_get_time()+2000000;
     while (received < len) {
+        if (esp_timer_get_time()>=deadline) {free(buf);return ESP_ERR_TIMEOUT;}
         int chunk = httpd_req_recv(req, buf + received, len - received);
-        if (chunk <= 0) {
+        if (chunk <= 0 || esp_timer_get_time()>=deadline) {
             free(buf);
             return ESP_FAIL;
         }
         received += chunk;
     }
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = memchr(buf,0,(size_t)len) ? NULL : shu1_json_parse(buf);
     free(buf);
     if (!root) return ESP_ERR_INVALID_ARG;
     *out = root;
@@ -609,20 +665,37 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
 
 static esp_err_t settings_post_handler(httpd_req_t *req) {
     add_common_headers(req);
-    if (reject_unauthorized(req)) return ESP_OK;
+    if (reject_unauthorized(req)) return ESP_FAIL;
     cJSON *root = NULL;
     if (read_json_body(req, &root) != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"invalid_json\"}");
-        return ESP_OK;
+        return ESP_FAIL; // Close; never let HTTPD drain an unbounded slow body.
     }
 
     SHU1_CONTROL_GUARD(policy_guard);
     cJSON *factory_reset = cJSON_GetObjectItem(root, "factory_reset");
+    if (shu1_stop_requested(root)) {
+        shu1_settings_t stopped=shu1_state_get_settings();
+        if(cJSON_IsTrue(cJSON_GetObjectItem(root,"emergency_stop")))
+            shu1_safety_latch_trip_volatile(SHU1_HEATER_PANIC_OFF);
+        apply_safe_stop(&stopped);
+        shu1_control_release_any();
+        shu1_state_update_settings_command(&stopped);
+        shu1_safety_wake();
+        shu1_control_guard_end(&policy_guard);
+        cJSON_Delete(root);
+        cJSON *reply=state_to_json();
+        char *txt=cJSON_PrintUnformatted(reply);
+        httpd_resp_sendstr(req,txt ? txt : "{}");
+        cJSON_free(txt);cJSON_Delete(reply);
+        return ESP_OK;
+    }
     cJSON *receipt = cJSON_GetObjectItemCaseSensitive(root, "virtual_door_ack");
     if (receipt && root->child == receipt && !receipt->next && cJSON_IsNumber(receipt) &&
         receipt->valuedouble > 0 && receipt->valuedouble < 9007199254740992.0) {
         shu1_virtual_door_ack((int64_t)receipt->valuedouble);
+        shu1_control_guard_end(&policy_guard);
         cJSON_Delete(root);
         cJSON *reply = state_to_json();
         char *text = cJSON_PrintUnformatted(reply);
@@ -653,12 +726,36 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
         cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch")) ||
         cJSON_IsTrue(cJSON_GetObjectItem(root, "emergency_stop")) ||
         cJSON_IsFalse(cJSON_GetObjectItem(root, "work_on"));
+    if(!stopping && cJSON_GetObjectItemCaseSensitive(root,"printer_setup")) {
+        esp_err_t error=shu1_moonraker_setup_request(root);
+        shu1_control_guard_end(&policy_guard);
+        cJSON_Delete(root);
+        if(error!=ESP_OK) {
+            httpd_resp_set_status(req,error==ESP_ERR_INVALID_ARG ? "400 Bad Request":"409 Conflict");
+            httpd_resp_sendstr(req,"{\"ok\":false,\"error\":\"printer_setup_rejected_idle_and_fresh_revision_required\"}");
+        } else {
+            cJSON *reply=state_to_json();char *text=cJSON_PrintUnformatted(reply);
+            httpd_resp_sendstr(req,text ? text:"{}");cJSON_free(text);cJSON_Delete(reply);
+        }
+        return ESP_OK;
+    }
+    if(!stopping && (cJSON_GetObjectItem(root,"moonraker_host") || cJSON_GetObjectItem(root,"moonraker_port") || cJSON_GetObjectItem(root,"moonraker_api_key"))) {
+        shu1_control_guard_end(&policy_guard);
+        cJSON_Delete(root);httpd_resp_set_status(req,"400 Bad Request");
+        httpd_resp_sendstr(req,"{\"ok\":false,\"error\":\"use_tested_printer_setup\"}");return ESP_OK;
+    }
     cJSON *chamber_offset = cJSON_GetObjectItem(root, "warehouse_temp_offset");
     cJSON *ptc_offset = cJSON_GetObjectItem(root, "ptc_temp_offset");
     const bool calibration = chamber_offset || ptc_offset;
+    if(!stopping && (cJSON_GetObjectItem(root,"wifi_ssid") || cJSON_GetObjectItem(root,"wifi_password"))) {
+        shu1_control_guard_end(&policy_guard);cJSON_Delete(root);
+        httpd_resp_set_status(req,"400 Bad Request");
+        httpd_resp_sendstr(req,"{\"ok\":false,\"error\":\"use_ble_wifi_setup\"}");return ESP_OK;
+    }
     if (!stopping && shu1_control_maintenance_active() &&
         (cJSON_GetObjectItem(root, "wifi_ssid") || cJSON_GetObjectItem(root, "wifi_password") ||
          cJSON_GetObjectItem(root, "moonraker_host") || cJSON_GetObjectItem(root, "moonraker_port"))) {
+        shu1_control_guard_end(&policy_guard);
         cJSON_Delete(root);
         httpd_resp_set_status(req, "409 Conflict");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"network_setup_busy\"}");
@@ -802,9 +899,6 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
         st.material_mismatch_printer_profile = SHU1_PROFILE_CUSTOM;
         st.material_mismatch_detected_ms = 0;
     }
-    st.anti_warp_enabled = json_bool(root, "anti_warp_enabled", st.anti_warp_enabled);
-    st.large_print_protection_enabled = json_bool(root, "large_print_protection_enabled", st.large_print_protection_enabled);
-    st.safe_overnight_enabled = json_bool(root, "safe_overnight_enabled", st.safe_overnight_enabled);
     st.pause_hold_enabled = json_bool(root, "pause_hold_enabled", st.pause_hold_enabled);
     st.pause_hold_strategy = json_int_clamp(root, "pause_hold_strategy", st.pause_hold_strategy, SHU1_PAUSE_HOLD_KEEP, SHU1_PAUSE_HOLD_STOP_AFTER);
     st.pause_hold_min = json_int_clamp(root, "pause_hold_min", st.pause_hold_min, 1, 720);
@@ -854,17 +948,11 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
     st.airflow_detection_enabled = json_bool(root, "airflow_detection_enabled", st.airflow_detection_enabled);
     st.pla_protection_enabled = json_bool(root, "pla_protection_enabled", st.pla_protection_enabled);
     st.pla_protection_confirmed = json_bool(root, "pla_protection_confirmed", st.pla_protection_confirmed);
-    st.smart_resume_enabled = json_bool(root, "smart_resume_enabled", st.smart_resume_enabled);
-    st.resume_recover_min = json_int_clamp(root, "resume_recover_min", st.resume_recover_min, 0, 120);
     st.post_print_pickup_mode = json_int_clamp(root, "post_print_pickup_mode", st.post_print_pickup_mode, SHU1_PICKUP_OFF, SHU1_PICKUP_NOTIFY_ONLY);
     st.pickup_keep_warm_min = json_int_clamp(root, "pickup_keep_warm_min", st.pickup_keep_warm_min, 1, 720);
     st.print_risk_enabled = json_bool(root, "print_risk_enabled", st.print_risk_enabled);
     st.start_print_warning_enabled = json_bool(root, "start_print_warning_enabled", st.start_print_warning_enabled);
-    st.local_recipes_enabled = json_bool(root, "local_recipes_enabled", st.local_recipes_enabled);
-    st.active_recipe_slot = json_int_clamp(root, "active_recipe_slot", st.active_recipe_slot, 0, 8);
     st.safety_score_enabled = json_bool(root, "safety_score_enabled", st.safety_score_enabled);
-    cJSON *recipe_name = cJSON_GetObjectItem(root, "active_recipe_name");
-    if (cJSON_IsString(recipe_name)) snprintf(st.active_recipe_name, sizeof(st.active_recipe_name), "%s", recipe_name->valuestring);
     cJSON *ack_filter = cJSON_GetObjectItem(root, "ack_filter_life_warning");
     if (cJSON_IsBool(ack_filter) && cJSON_IsTrue(ack_filter)) st.filter_life_warning_pending = false;
     cJSON *ack_wear = cJSON_GetObjectItem(root, "ack_heater_wear_warning");
@@ -897,7 +985,6 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
     st.language_code = json_int_clamp(root, "language_code", st.language_code, SHU1_LANG_EN, SHU1_LANG_PL);
     st.local_only_mode = json_bool(root, "local_only_mode", st.local_only_mode);
     st.ota_enabled = json_bool(root, "ota_enabled", st.ota_enabled);
-    st.contest_showcase_mode_enabled = json_bool(root, "contest_showcase_mode_enabled", st.contest_showcase_mode_enabled);
     st.symbiont_mode_enabled = json_bool(root, "symbiont_mode_enabled", st.symbiont_mode_enabled);
     st.symbiont_ventilation_allowed = json_bool(root, "symbiont_ventilation_allowed", st.symbiont_ventilation_allowed);
     st.symbiont_safe_control_enabled = json_bool(root, "symbiont_safe_control_enabled", st.symbiont_safe_control_enabled);
@@ -1076,10 +1163,22 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
     }
     // Calibration is idle-only and all ownership/revision checks have passed.
     esp_err_t calibration_error = ESP_OK;
+    if(calibration) {
+        if(!shu1_control_network_setup_begin()) {
+            shu1_control_guard_end(&policy_guard);cJSON_Delete(root);
+            httpd_resp_set_status(req,"409 Conflict");httpd_resp_sendstr(req,"{\"error\":\"maintenance_busy\"}");return ESP_OK;
+        }
+        shu1_control_guard_end(&policy_guard);
+    }
     if (cJSON_IsNumber(chamber_offset))
         calibration_error = shu1_ntc_set_offset_c(0, (float)chamber_offset->valuedouble);
     if (calibration_error == ESP_OK && cJSON_IsNumber(ptc_offset))
         calibration_error = shu1_ntc_set_offset_c(1, (float)ptc_offset->valuedouble);
+    if(calibration) {
+        policy_guard=shu1_control_guard_begin();
+        st=shu1_state_get_settings(); // Do not overwrite an OFF received during the flash write.
+        shu1_control_maintenance_end();
+    }
     if (calibration_error != ESP_OK) {
         shu1_control_guard_end(&policy_guard);
         cJSON_Delete(root);
@@ -1089,27 +1188,12 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
     }
     if (calibration) shu1_control_release_any(); // Advance revision for the accepted calibration.
     shu1_settings_limit_targets(&st);
-    esp_err_t persist_err = calibration ? ESP_OK : shu1_settings_store_save_settings(&st);
+    esp_err_t persist_err = calibration ? ESP_OK : shu1_settings_defer(&st);
 
-    cJSON *ssid = cJSON_GetObjectItem(root, "wifi_ssid");
-    cJSON *password = cJSON_GetObjectItem(root, "wifi_password");
-    cJSON *mh = cJSON_GetObjectItem(root, "moonraker_host");
-    cJSON *mp = cJSON_GetObjectItem(root, "moonraker_port");
-    if (cJSON_IsString(ssid) || cJSON_IsString(password) || cJSON_IsString(mh) || cJSON_IsNumber(mp)) {
-        shu1_device_config_t cfg;
-        shu1_device_config_defaults(&cfg);
-        shu1_settings_store_load_device_config(&cfg);
-        if (cJSON_IsString(ssid)) snprintf(cfg.wifi_ssid, sizeof(cfg.wifi_ssid), "%s", ssid->valuestring);
-        if (cJSON_IsString(password)) snprintf(cfg.wifi_password, sizeof(cfg.wifi_password), "%s", password->valuestring);
-        if (cJSON_IsString(mh)) snprintf(cfg.moonraker_host, sizeof(cfg.moonraker_host), "%s", mh->valuestring);
-        if (cJSON_IsNumber(mp)) cfg.moonraker_port = mp->valueint;
-        if (persist_err == ESP_OK) persist_err = shu1_settings_store_save_device_config(&cfg);
-        if (persist_err == ESP_OK) shu1_device_config_require_restart();
-    }
 
 
     if (persist_err != ESP_OK) {
-        // Writes may be partial: do not admit heat or pretend the command succeeded.
+        // The storage mailbox is unavailable: do not admit a new heating job.
         shu1_safety_latch_inhibit();
         shu1_settings_stop(&st);
         shu1_control_release_any();
@@ -1136,12 +1220,12 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
 
 static esp_err_t heartbeat_post_handler(httpd_req_t *req) {
     add_common_headers(req);
-    if (reject_unauthorized(req)) return ESP_OK;
+    if (reject_unauthorized(req)) return ESP_FAIL;
     cJSON *root = NULL;
     if (read_json_body(req, &root) != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"invalid_json\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
     cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "lease_id");
     bool valid = cJSON_IsString(item) &&
@@ -1158,12 +1242,12 @@ static esp_err_t heartbeat_post_handler(httpd_req_t *req) {
 
 static esp_err_t probe_post_handler(httpd_req_t *req) {
     add_common_headers(req);
-    if (reject_unauthorized(req)) return ESP_OK;
+    if (reject_unauthorized(req)) return ESP_FAIL;
     cJSON *root = NULL;
     if (read_json_body(req, &root) != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"invalid_json\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
 
     const char *output = NULL;
@@ -1192,12 +1276,12 @@ static esp_err_t probe_post_handler(httpd_req_t *req) {
 
 static esp_err_t token_post_handler(httpd_req_t *req) {
     add_common_headers(req);
-    if (reject_unauthorized(req)) return ESP_OK;
+    if (reject_unauthorized(req)) return ESP_FAIL;
     cJSON *root = NULL;
     if (read_json_body(req, &root) != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"invalid_json\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
     cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "token");
     const char *token = cJSON_IsString(item) ? item->valuestring : NULL;
@@ -1235,7 +1319,7 @@ static esp_err_t token_post_handler(httpd_req_t *req) {
 
 static esp_err_t auth_check_get_handler(httpd_req_t *req) {
     add_common_headers(req);
-    if (reject_unauthorized(req)) return ESP_OK;
+    if (reject_unauthorized(req)) return ESP_FAIL;
     return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
@@ -1251,37 +1335,53 @@ static esp_err_t ota_info_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t ota_update_post_handler(httpd_req_t *req) {
+    // Always close this connection after sending the reply. HTTPD otherwise
+    // drains unread request bytes after an early rejection, outside our deadline.
     add_common_headers(req);
-    if (reject_unauthorized(req)) return ESP_OK;
+    if (reject_unauthorized(req)) return ESP_FAIL;
+    char expected_hex[65];
+    uint8_t expected_digest[32];
+    if (httpd_req_get_hdr_value_len(req, SHU1_OTA_SHA256_HEADER) != 64 ||
+        httpd_req_get_hdr_value_str(req, SHU1_OTA_SHA256_HEADER, expected_hex, sizeof(expected_hex)) != ESP_OK ||
+        !shu1_ota_parse_sha256(expected_hex, expected_digest)) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"expected_sha256_required\"}");
+        return ESP_FAIL;
+    }
     maintenance_scope_t maintenance __attribute__((cleanup(maintenance_release))) = maintenance_acquire();
     if (!maintenance.acquired) {
         httpd_resp_set_status(req, "409 Conflict");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"outputs_or_heating_busy\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
     if (!shu1_state_get_settings().ota_enabled) {
         httpd_resp_set_status(req, "403 Forbidden");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ota_disabled\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
     const esp_partition_t *partition = esp_ota_get_next_update_partition(NULL);
     if (!partition) {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"no_inactive_ota_slot\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
     if (req->content_len <= 0 || (size_t)req->content_len > partition->size) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"invalid_image_size\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
 
+    if (shu1_ota_slot_pending(partition,true)!=ESP_OK) {
+        httpd_resp_set_status(req,"500 Internal Server Error");
+        httpd_resp_sendstr(req,"{\"ok\":false,\"error\":\"ota_marker_failed\"}");
+        return ESP_FAIL;
+    }
     esp_ota_handle_t update = 0;
     esp_err_t err = esp_ota_begin(partition, OTA_WITH_SEQUENTIAL_WRITES, &update);
     if (err != ESP_OK) {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ota_begin_failed\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
 
     uint8_t *buffer = malloc(SHU1_OTA_BUFFER_SIZE);
@@ -1289,7 +1389,7 @@ static esp_err_t ota_update_post_handler(httpd_req_t *req) {
         esp_ota_abort(update);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"out_of_memory\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
     mbedtls_sha256_context sha;
     mbedtls_sha256_init(&sha);
@@ -1299,7 +1399,7 @@ static esp_err_t ota_update_post_handler(httpd_req_t *req) {
         esp_ota_abort(update);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"sha_init_failed\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
 
     int remaining = req->content_len;
@@ -1325,14 +1425,25 @@ static esp_err_t ota_update_post_handler(httpd_req_t *req) {
         esp_ota_abort(update);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"ota_receive_or_write_failed\"}");
-        return ESP_OK;
+        return ESP_FAIL;
+    }
+
+    if (memcmp(digest, expected_digest, sizeof(digest)) != 0) {
+        esp_ota_abort(update);
+        /* A valid ESP image with a wrong transfer hash must not remain
+         * selectable through boot-inactive either. */
+        if (esp_partition_erase_range(partition, 0, partition->erase_size) != ESP_OK)
+            maintenance.keep = true;
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"sha256_mismatch\"}");
+        return ESP_FAIL;
     }
 
     err = esp_ota_end(update);
     if (err != ESP_OK) {
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"invalid_esp_image\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
     esp_app_desc_t image = {0};
     err = esp_ota_get_partition_description(partition, &image);
@@ -1344,13 +1455,21 @@ static esp_err_t ota_update_post_handler(httpd_req_t *req) {
         httpd_resp_sendstr(req,
             "{\"ok\":false,\"error\":\"untrusted_project_identity\","
             "\"accepted\":[\"SnapHeater_U1\",\"dragonbreath\",\"panda_breath\"]}");
-        return ESP_OK;
+        return ESP_FAIL;
+    }
+    // Only a completely received, hash-matched, valid image may become bootable
+    // through this API. Failed uploads remain rejected across power cycles.
+    if (shu1_ota_slot_pending(partition,false)!=ESP_OK || !shu1_ota_slot_boot_allowed(partition)) {
+        (void)shu1_ota_slot_pending(partition,true);
+        httpd_resp_set_status(req,"500 Internal Server Error");
+        httpd_resp_sendstr(req,"{\"ok\":false,\"error\":\"ota_marker_failed\"}");
+        return ESP_FAIL;
     }
     err = esp_ota_set_boot_partition(partition);
     if (err != ESP_OK) {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"set_boot_partition_failed\"}");
-        return ESP_OK;
+        return ESP_FAIL;
     }
 
     maintenance.keep = true; // Boot changed: inhibit until restart.
@@ -1371,12 +1490,12 @@ static esp_err_t ota_update_post_handler(httpd_req_t *req) {
     cJSON_Delete(reply);
     shu1_event_log_add("warn", "ota_accepted", "validated image written to inactive slot; reboot scheduled");
     if (!schedule_restart()) ESP_LOGE(TAG, "OTA accepted but restart task could not be created");
-    return ESP_OK;
+    return ESP_FAIL;
 }
 
 static esp_err_t boot_inactive_post_handler(httpd_req_t *req) {
     add_common_headers(req);
-    if (reject_unauthorized(req)) return ESP_OK;
+    if (reject_unauthorized(req)) return ESP_FAIL;
     maintenance_scope_t maintenance __attribute__((cleanup(maintenance_release))) = maintenance_acquire();
     if (!maintenance.acquired) {
         httpd_resp_set_status(req, "409 Conflict");
@@ -1385,6 +1504,11 @@ static esp_err_t boot_inactive_post_handler(httpd_req_t *req) {
     }
     const esp_partition_t *partition = esp_ota_get_next_update_partition(NULL);
     esp_app_desc_t image = {0};
+    if (!shu1_ota_slot_boot_allowed(partition)) {
+        httpd_resp_set_status(req,"409 Conflict");
+        httpd_resp_sendstr(req,"{\"ok\":false,\"error\":\"inactive_upload_not_verified\"}");
+        return ESP_OK;
+    }
     if (!partition || esp_ota_get_partition_description(partition, &image) != ESP_OK) {
         httpd_resp_set_status(req, "409 Conflict");
         httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"empty_inactive_slot\"}");
@@ -1416,6 +1540,7 @@ static esp_err_t events_get_handler(httpd_req_t *req) {
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "count", shu1_event_log_count());
     cJSON_AddItemToObject(root, "events", shu1_event_log_to_json());
+    cJSON_AddItemToObject(root, "notifications", shu1_event_notifications());
     char *txt = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, txt ? txt : "{}");
     cJSON_free(txt);
@@ -1431,37 +1556,75 @@ static esp_err_t health_get_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+static esp_err_t history_get_handler(httpd_req_t *req) {
+    add_common_headers(req);
+    char query[48], value[16];
+    uint32_t after=0;
+    if(httpd_req_get_url_query_len(req)>0) {
+        if(httpd_req_get_url_query_str(req,query,sizeof(query))!=ESP_OK ||
+            httpd_query_key_value(query,"after",value,sizeof(value))!=ESP_OK || !value[0])
+            goto bad_query;
+        uint64_t parsed=0;
+        for(const char *p=value;*p;p++) {
+            if(*p<'0' || *p>'9') goto bad_query;
+            parsed=parsed*10+(unsigned)(*p-'0');
+            if(parsed>UINT32_MAX) goto bad_query;
+        }
+        after=(uint32_t)parsed;
+    }
+    cJSON *root=shu1_recorder_page(after);
+    char *txt=root?cJSON_PrintUnformatted(root):NULL;
+    if(!txt) {
+        httpd_resp_set_status(req,"503 Service Unavailable");
+        httpd_resp_sendstr(req,"{\"error\":\"history_unavailable\"}");
+    } else httpd_resp_sendstr(req,txt);
+    cJSON_free(txt); cJSON_Delete(root);
+    return ESP_OK;
+bad_query:
+    httpd_resp_set_status(req,"400 Bad Request");
+    httpd_resp_sendstr(req,"{\"error\":\"invalid_history_cursor\"}");
+    return ESP_OK;
+}
+
 esp_err_t shu1_api_server_start(void) {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = SHU1_API_PORT;
     config.ctrl_port = 32768;
     config.max_uri_handlers = 20;
     config.stack_size = 8192;
+    config.recv_wait_timeout = 1;
+    config.send_wait_timeout = 1;
+    config.lru_purge_enable = true;
+    config.open_fn = api_connection_open;
     httpd_handle_t server = NULL;
     ESP_RETURN_ON_ERROR(httpd_start(&server, &config), TAG, "http server start failed");
 
-    httpd_uri_t health = {.uri = "/api/health", .method = HTTP_GET, .handler = health_get_handler};
-    httpd_uri_t status = {.uri = "/api/status", .method = HTTP_GET, .handler = status_get_handler};
-    httpd_uri_t settings_post = {.uri = "/api/settings", .method = HTTP_POST, .handler = settings_post_handler};
-    httpd_uri_t probe_post = {.uri = "/api/probe", .method = HTTP_POST, .handler = probe_post_handler};
-    httpd_uri_t token_post = {.uri = "/api/token", .method = HTTP_POST, .handler = token_post_handler};
-    httpd_uri_t token_v2_post = {.uri = "/api/v2/token", .method = HTTP_POST, .handler = token_post_handler};
-    httpd_uri_t heartbeat_post = {.uri = "/api/heartbeat", .method = HTTP_POST, .handler = heartbeat_post_handler};
-    httpd_uri_t heartbeat_v2_post = {.uri = "/api/v2/heartbeat", .method = HTTP_POST, .handler = heartbeat_post_handler};
-    httpd_uri_t events = {.uri = "/api/events", .method = HTTP_GET, .handler = events_get_handler};
-    httpd_uri_t ota_info = {.uri = "/api/v2/ota", .method = HTTP_GET, .handler = ota_info_get_handler};
-    httpd_uri_t auth_check = {.uri = "/api/v2/auth", .method = HTTP_GET, .handler = auth_check_get_handler};
-    httpd_uri_t ota_update = {.uri = "/update", .method = HTTP_POST, .handler = ota_update_post_handler};
-    httpd_uri_t ota_update_v2 = {.uri = "/api/v2/update", .method = HTTP_POST, .handler = ota_update_post_handler};
-    httpd_uri_t boot_inactive = {.uri = "/api/v2/boot-inactive", .method = HTTP_POST, .handler = boot_inactive_post_handler};
+    static const httpd_uri_t health = {.uri = "/api/health", .method = HTTP_GET, .handler = health_get_handler};
+    static const httpd_uri_t history = {.uri = "/api/history", .method = HTTP_GET, .handler = history_get_handler};
+    static const httpd_uri_t status = {.uri = "/api/status", .method = HTTP_GET, .handler = status_get_handler};
+    static const httpd_uri_t settings_post = {.uri = "/api/settings", .method = HTTP_POST, .handler = settings_post_handler};
+    static const httpd_uri_t probe_post = {.uri = "/api/probe", .method = HTTP_POST, .handler = probe_post_handler};
+    static const httpd_uri_t token_post = {.uri = "/api/token", .method = HTTP_POST, .handler = token_post_handler};
+    static const httpd_uri_t token_v2_post = {.uri = "/api/v2/token", .method = HTTP_POST, .handler = token_post_handler};
+    static const httpd_uri_t heartbeat_post = {.uri = "/api/heartbeat", .method = HTTP_POST, .handler = heartbeat_post_handler};
+    static const httpd_uri_t heartbeat_v2_post = {.uri = "/api/v2/heartbeat", .method = HTTP_POST, .handler = heartbeat_post_handler};
+    static const httpd_uri_t events = {.uri = "/api/events", .method = HTTP_GET, .handler = events_get_handler};
+    static const httpd_uri_t ota_info = {.uri = "/api/v2/ota", .method = HTTP_GET, .handler = ota_info_get_handler};
+    static const httpd_uri_t auth_check = {.uri = "/api/v2/auth", .method = HTTP_GET, .handler = auth_check_get_handler};
+    static const httpd_uri_t ota_update = {.uri = "/update", .method = HTTP_POST, .handler = ota_update_post_handler};
+    static const httpd_uri_t ota_update_v2 = {.uri = "/api/v2/update", .method = HTTP_POST, .handler = ota_update_post_handler};
+    static const httpd_uri_t boot_inactive = {.uri = "/api/v2/boot-inactive", .method = HTTP_POST, .handler = boot_inactive_post_handler};
 
     const httpd_uri_t *routes[] = {
-        &health, &status, &settings_post, &probe_post, &token_post,
+        &health, &history, &status, &settings_post, &probe_post, &token_post,
         &token_v2_post, &heartbeat_post, &heartbeat_v2_post, &events,
         &auth_check, &ota_info, &ota_update, &ota_update_v2, &boot_inactive,
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); ++i) {
-        esp_err_t err = httpd_register_uri_handler(server, routes[i]);
+        httpd_uri_t guarded = *routes[i];
+        guarded.handler = api_guarded_handler;
+        guarded.user_ctx = (void *)routes[i];
+        esp_err_t err = httpd_register_uri_handler(server, &guarded);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "route registration failed for %s: %s",
                      routes[i]->uri, esp_err_to_name(err));

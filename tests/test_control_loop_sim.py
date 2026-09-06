@@ -11,7 +11,7 @@ SCENARIOS=("chamber_open", "ptc_short", "nan_with_ok_status", "adc_read_error",
            "foldback_33k", "foldback_82k", "frozen_cold_sensors", "ineffective_cooling",
            "overheat_and_nvs_failure", "off", "watchdog_registration_failure",
            "hot_reboot_cooldown", "ota_maintenance", "stalled_task_and_reboot_observation",
-           "frozen_near_target_observation", "rest_disconnect_keeps_local_job", "ble_disconnect_keeps_local_job",
+           "dual_raw_freeze_near_target_and_recovery", "rest_disconnect_keeps_local_job", "ble_disconnect_keeps_local_job",
            "ota_rejected_while_heating", "zero_cross_return_stays_disarmed",
            "zero_cross_clear_and_explicit_rearm", "zero_cross_nvs_failure",
            "startup_without_zero_cross", "zero_cross_loss_after_off",
@@ -23,7 +23,14 @@ SCENARIOS=("chamber_open", "ptc_short", "nan_with_ok_status", "adc_read_error",
            "auto_stale_completion_does_not_start_tempering", "auto_tempering_never_ramps_up",
            "offline_phone_print_completes_and_tempers", "offline_phone_off_still_wins",
            "offline_phone_zc_loss_stays_off", "offline_phone_sensor_fault",
-           "offline_phone_drying_deadline", "offline_phone_scheduled_preheat")
+           "offline_phone_drying_deadline", "offline_phone_scheduled_preheat",
+           "user_pause_blocks_ssr", "off_clears_paused_job", "sensor_fault_clears_paused_job",
+           "replayed_adc_sequence", "old_adc_timestamp", "future_adc_timestamp", "slow_adc_acquisition",
+           "freeze_warning_resolves", "freeze_warning_user_stop", "freeze_warning_sensor_fault_immediate",
+           "freeze_warning_zc_loss_immediate", "freeze_warning_overheat_immediate", "freeze_warning_pause_does_not_extend_deadline",
+           "symbiont_curve_no_simultaneous_heating", "symbiont_overheat_still_latches", "symbiont_disconnect_does_not_stop_manual_job",
+           "negative_ptc_offset_cannot_delay_cut", "negative_chamber_offset_cannot_delay_cut",
+           "foldback_override_cannot_raise_board_limit")
 
 class ControlLoopSimulationTests(unittest.TestCase):
     def test_production_control_loop_scenarios(self):
@@ -36,7 +43,7 @@ class ControlLoopSimulationTests(unittest.TestCase):
                       ROOT/"main",Path(os.environ.get("SHU1_TEST_CONFIG", str(ROOT/"build-heater-compile-test/config"))),idf/"components/json/cJSON"]:
                 cmd.append("-I"+str(p))
             for p in ["tests/control_loop_sim.c","main/app_state.c","main/control_lease.c",
-                      "main/safety_latch.c","main/heater.c","main/fan_triac.c","main/dc_pid.c","main/profiles.c"]:
+                      "main/safety_latch.c","main/session_journal.c","main/heater.c","main/fan_triac.c","main/dc_pid.c","main/profiles.c"]:
                 cmd.append(str(ROOT/p))
             result=subprocess.run(cmd+["-o",str(exe)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)

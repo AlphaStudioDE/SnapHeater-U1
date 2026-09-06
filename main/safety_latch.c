@@ -4,6 +4,10 @@
  */
 #include "safety_latch.h"
 #include "heater.h"
+#include "event_log.h"
+#include "ntc.h"
+#include "thermal_limits.h"
+#include <math.h>
 
 #include "nvs.h"
 #include "esp_log.h"
@@ -20,6 +24,9 @@ static shu1_heater_fault_t g_fault = SHU1_HEATER_OK;
 static portMUX_TYPE g_latch_mux = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t g_nvs_mutex;
 static int64_t g_last_persist_attempt_us;
+static uint64_t g_generation;
+static bool g_deferred_clear;
+static uint64_t g_clear_generation;
 
 // Caller must hold g_nvs_mutex. Keeping the NVS transaction separate lets the
 // retry path re-read RAM only after it owns the same lock as clear().
@@ -42,6 +49,7 @@ esp_err_t shu1_safety_latch_init(void) {
     g_persist_pending = false;
     g_fault = SHU1_HEATER_OK;
     g_last_persist_attempt_us = 0;
+    ++g_generation;g_deferred_clear=false;
     if (!g_nvs_mutex) {
         g_latched = true;
         g_fault = SHU1_HEATER_NVS_UNREADABLE;
@@ -82,6 +90,8 @@ void shu1_safety_latch_inhibit(void) {
     g_latched = true;
     g_fault = SHU1_HEATER_PERSISTED_FAULT;
     g_clear_requested = false;
+    ++g_generation;
+    g_deferred_clear=false;
     portEXIT_CRITICAL(&g_latch_mux);
 }
 bool shu1_safety_latch_is_inhibited(void) {
@@ -145,11 +155,12 @@ void shu1_safety_latch_trip_volatile(shu1_heater_fault_t fault) {
 esp_err_t shu1_safety_latch_retry_persist(void) {
     portENTER_CRITICAL(&g_latch_mux);
     const bool pending = g_persist_pending;
+    const int64_t last_attempt=g_last_persist_attempt_us;
     portEXIT_CRITICAL(&g_latch_mux);
     if (!pending) return ESP_OK;
 
     const int64_t now = esp_timer_get_time();
-    if (g_last_persist_attempt_us != 0 && now - g_last_persist_attempt_us < 2000000)
+    if (last_attempt != 0 && now - last_attempt < 2000000)
         return ESP_ERR_INVALID_STATE;
     if (!g_nvs_mutex || xSemaphoreTake(g_nvs_mutex, 0) != pdTRUE)
         return ESP_ERR_TIMEOUT;
@@ -160,6 +171,7 @@ esp_err_t shu1_safety_latch_retry_persist(void) {
     portENTER_CRITICAL(&g_latch_mux);
     const bool still_latched = g_latched;
     const shu1_heater_fault_t fault = g_fault;
+    const uint64_t generation=g_generation;
     g_last_persist_attempt_us = now;
     portEXIT_CRITICAL(&g_latch_mux);
     esp_err_t err = still_latched
@@ -167,7 +179,7 @@ esp_err_t shu1_safety_latch_retry_persist(void) {
         : ESP_OK;
     if (err == ESP_OK) {
         portENTER_CRITICAL(&g_latch_mux);
-        g_persist_pending = false;
+        if(g_generation==generation) g_persist_pending = false;
         portEXIT_CRITICAL(&g_latch_mux);
         ESP_LOGW(TAG, "previously failed heater-fault persistence recovered");
     } else {
@@ -183,9 +195,10 @@ void shu1_safety_latch_request_clear(void) {
     portEXIT_CRITICAL(&g_latch_mux);
 }
 
-bool shu1_safety_latch_clear_requested(void) {
+bool shu1_safety_latch_take_clear_request(void) {
     portENTER_CRITICAL(&g_latch_mux);
     bool value = g_clear_requested;
+    g_clear_requested = false;
     portEXIT_CRITICAL(&g_latch_mux);
     return value;
 }
@@ -205,4 +218,80 @@ esp_err_t shu1_safety_latch_clear(void) {
     }
     xSemaphoreGive(g_nvs_mutex);
     return err;
+}
+
+void shu1_safety_latch_defer_trip(shu1_heater_fault_t fault) {
+    shu1_heater_cut_power();
+    if(fault<=SHU1_HEATER_OK || fault>=SHU1_HEATER_FAULT_COUNT) fault=SHU1_HEATER_PERSISTED_FAULT;
+    portENTER_CRITICAL(&g_latch_mux);
+    ++g_generation;g_latched=true;g_fault=fault;g_persist_pending=true;
+    g_clear_requested=false;g_deferred_clear=false;g_last_persist_attempt_us=0;
+    portEXIT_CRITICAL(&g_latch_mux);
+}
+
+void shu1_safety_latch_defer_clear(void) {
+    portENTER_CRITICAL(&g_latch_mux);
+    if(!g_inhibited && g_latched) {
+        g_deferred_clear=true;g_clear_generation=g_generation;
+    }
+    portEXIT_CRITICAL(&g_latch_mux);
+}
+
+const char *shu1_safety_latch_clear_block_reason(const shu1_settings_t *settings,const shu1_runtime_t *runtime) {
+    // Worker caller holds policy guard; recheck AFTER storage, not just at request time.
+#define st (*settings)
+#define rt (*runtime)
+    int64_t age=esp_timer_get_time()/1000-rt.last_sensor_ms;
+    if(shu1_safety_latch_is_inhibited()) return "inhibited";
+    if(st.work_on || st.scheduled_preheat_enabled || rt.heater_output_on) return "busy";
+    if(rt.last_sensor_ms<=0 || age<0 || age>1500 ||
+       rt.chamber_sensor_status!=SHU1_SENSOR_OK || rt.ptc_sensor_status!=SHU1_SENSOR_OK ||
+       !isfinite(rt.chamber_instant_temp_c) || !isfinite(rt.ptc_instant_temp_c)) return "sensors";
+    if(!(shu1_safety_temperature(rt.chamber_instant_temp_c,shu1_ntc_get_offset_c(0))<SHU1_CHAMBER_HARD_CUTOFF_C) ||
+       !(shu1_safety_temperature(rt.ptc_instant_temp_c,shu1_ntc_get_offset_c(1))<SHU1_PTC_HARD_CUTOFF_C)) return "temperature";
+    if(shu1_safety_latch_fault()==SHU1_HEATER_ZERO_CROSS_LOST && !rt.zero_cross_signal_present) return "zero_cross";
+    return "";
+#undef st
+#undef rt
+}
+
+static bool clear_state_safe(void) {
+    shu1_settings_t settings=shu1_state_get_settings();
+    shu1_runtime_t runtime=shu1_state_get_runtime();
+    return shu1_safety_latch_clear_block_reason(&settings,&runtime)[0]=='\0';
+}
+
+void shu1_safety_latch_service(void) {
+    // Only the storage worker calls this. Never hold policy across NVS or its mutex.
+    portENTER_CRITICAL(&g_latch_mux);
+    bool clear=g_deferred_clear && !g_inhibited;
+    uint64_t generation=g_clear_generation;
+    g_deferred_clear=false;
+    portEXIT_CRITICAL(&g_latch_mux);
+    if(!clear) {(void)shu1_safety_latch_retry_persist();return;}
+    if(!g_nvs_mutex) return;
+    xSemaphoreTake(g_nvs_mutex,portMAX_DELAY);
+    shu1_control_guard_t guard=shu1_control_guard_begin();
+    bool safe=clear_state_safe();
+    portENTER_CRITICAL(&g_latch_mux);
+    safe=safe && g_latched && !g_inhibited && generation==g_generation;
+    portEXIT_CRITICAL(&g_latch_mux);
+    shu1_control_guard_end(&guard);
+    esp_err_t err=safe ? persist_fault_locked(false,SHU1_HEATER_OK):ESP_ERR_INVALID_STATE;
+    guard=shu1_control_guard_begin();
+    safe=err==ESP_OK && clear_state_safe();
+    portENTER_CRITICAL(&g_latch_mux);
+    safe=safe && !g_inhibited && generation==g_generation;
+    if(safe) {
+        ++g_generation;g_latched=false;g_fault=SHU1_HEATER_OK;
+        g_clear_requested=false;g_persist_pending=false;
+    } else if(g_latched) {
+        g_persist_pending=true;g_last_persist_attempt_us=0;
+    }
+    portEXIT_CRITICAL(&g_latch_mux);
+    shu1_control_guard_end(&guard);
+    xSemaphoreGive(g_nvs_mutex);
+    shu1_event_log_add(safe ? "info":"warn",safe ? "heater_fault_cleared":"fault_clear_failed",
+        safe ? "Fault clear persisted and current safe state revalidated; heating remains off":"Fault clear rejected or storage failed; latch remains active");
+    if(!safe) (void)shu1_safety_latch_retry_persist();
 }

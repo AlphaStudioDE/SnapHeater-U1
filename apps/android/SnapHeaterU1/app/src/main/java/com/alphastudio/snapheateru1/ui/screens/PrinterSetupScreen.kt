@@ -21,11 +21,12 @@ import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 
 @Composable
 fun PrinterSetupScreen(ready: Boolean, busy: Boolean, idle: Boolean, saved: Boolean,
-    status: String, onSave: (String, Int, String, String) -> Unit,
+    status: String, onSave: (String, Int, String) -> Unit,
     onContinue: () -> Unit, onSkip: () -> Unit, onReconnect: () -> Unit,
     initialHost: String = "", initialPort: Int = 7125, pandaIp: String = "") {
     var host by rememberSaveable { mutableStateOf(initialHost) }
     var port by rememberSaveable { mutableStateOf(initialPort.toString()) }
+    var apiKey by remember { mutableStateOf("") } // No preferences or saved-instance state.
     val context = LocalContext.current
     val scanner = remember(context.applicationContext) { PrinterDiscovery(context.applicationContext) }
     val scope = rememberCoroutineScope()
@@ -57,11 +58,12 @@ fun PrinterSetupScreen(ready: Boolean, busy: Boolean, idle: Boolean, saved: Bool
             } finally { scanning = false }
         }
     }
-    val valid = runCatching { printerConfiguration(host.trim(), port.toInt(), "", "") }.isSuccess
+    val valid = runCatching { printerConfiguration(host.trim(), port.toInt(), apiKey) }.isSuccess
     ScreenColumn {
         Text(stringResource(R.string.wizard_printer), style = MaterialTheme.typography.headlineMedium)
         Text(stringResource(R.string.wizard_help))
         Text(stringResource(R.string.discovery_help))
+        if(busy) {LinearProgressIndicator(Modifier.fillMaxWidth());Text(stringResource(R.string.printer_setup_testing))}
         Button(enabled = !busy && !scanning, onClick = { startDiscovery() }) {
             ActionLabel(Icons.Outlined.Search, stringResource(R.string.discovery_search))
         }
@@ -82,18 +84,23 @@ fun PrinterSetupScreen(ready: Boolean, busy: Boolean, idle: Boolean, saved: Bool
                 }
             }
         }
-        Text(stringResource(if (ready && !saved) R.string.wizard_ready else R.string.wizard_waiting))
+        Text(stringResource(if (ready) R.string.wizard_ready else R.string.wizard_waiting))
         OutlinedTextField(host, { host = it }, label = { Text(stringResource(R.string.wizard_host)) },
             singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(port, { port = it }, label = { Text(stringResource(R.string.wizard_port)) },
             singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(apiKey, {apiKey=it}, label={Text(stringResource(R.string.printer_api_key))},
+            visualTransformation=PasswordVisualTransformation(),singleLine=true,enabled=!busy,
+            modifier=Modifier.fillMaxWidth())
+        Text(stringResource(R.string.printer_key_help))
         if (!idle) Text(stringResource(R.string.wizard_idle))
         Button(enabled = valid && idle && !busy && !scanning, onClick = {
-            onSave(host.trim(), port.toInt(), "", "")
-        }) { Text(stringResource(R.string.wizard_save)) }
-        if (saved) Text(stringResource(R.string.wizard_restart))
+            onSave(host.trim(), port.toInt(), apiKey)
+            apiKey=""
+        }) { Text(stringResource(R.string.printer_test_save)) }
+        if (saved) Text(stringResource(R.string.printer_setup_success))
         Text(status)
-        Button(enabled = ready && !saved && !busy, onClick = onContinue) {
+        Button(enabled = ready && !busy, onClick = onContinue) {
             Text(stringResource(R.string.wizard_continue))
         }
         TextButton(enabled = !busy, onClick = onReconnect) { Text(stringResource(R.string.wizard_reconnect)) }

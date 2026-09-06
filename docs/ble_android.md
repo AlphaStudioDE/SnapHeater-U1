@@ -1,5 +1,10 @@
 # SnapHeater U1 BLE / Android control
 
+> 2026-09-06: Anti-Warp, Large Print Protection, Safe Overnight, recipes and
+> Showcase metadata and legacy Smart Resume have been retired. Their descriptions/payload examples below
+> are historical, not supported controls. See [Current implementation](CURRENT_IMPLEMENTATION.md)
+> and [pause/history update](LOCAL_HISTORY_PAUSE_UPDATE.md) for current behavior.
+
 Version: 0.4.0-dev
 
 ### Safety contract update — 2026-09-05
@@ -421,3 +426,8 @@ including its lease/heartbeat requirements. No separate arm action is required.
 Firmware runtime gates remain authoritative. An idle `latch_ready=false`
 does not prevent submitting a work request. Faults and maintenance still block
 activation. Legacy disarm is unconditional OFF; legacy arm has no effect.
+# Moonraker connection changes
+
+The unlocked BLE settings path accepts the dedicated `printer_setup` command.
+See [Moonraker setup](MOONRAKER_SETUP.md) for fields, progress, failure handling
+and credential limitations. Use matching Android and firmware versions.

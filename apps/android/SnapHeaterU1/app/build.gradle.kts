@@ -12,8 +12,8 @@ android {
         applicationId = "com.alphastudio.snapheateru1"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.9.9"
     }
 
     buildFeatures {

@@ -1,5 +1,8 @@
 # SnapHeater U1 build and test plan
 
+> **0.9.9 packaged prerelease:** use [installation instructions](docs/INSTALL_0.9.9.md)
+> for release assets. The source build is not an electrical qualification.
+
 Target: original Panda Breath ESP32-C3 electronics, not AirGuard 300.
 This source update is not a hardware-qualified binary release.
 

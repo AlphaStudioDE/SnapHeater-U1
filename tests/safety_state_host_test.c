@@ -14,9 +14,15 @@ static bool ssr_on;
 static bool persist_fail;
 static int persist_attempts;
 static HANDLE attempted, completed;
+static HANDLE storage_entered, storage_release;
+static bool block_storage;
 
 void shu1_heater_cut_power(void) { ssr_on = false; }
+float shu1_ntc_get_offset_c(int channel) {(void)channel;return 0.0f;}
 bool shu1_fan_triac_is_active(void) { return false; }
+void shu1_event_log_add(const char *level,const char *code,const char *message) {
+    (void)level;(void)code;(void)message;
+}
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *out) {
     (void)ns; *out = 1;
     if (mode == NVS_READONLY) return ESP_ERR_NVS_NOT_FOUND;
@@ -31,6 +37,10 @@ esp_err_t nvs_set_u8(nvs_handle_t h, const char *k, uint8_t v) {
 }
 esp_err_t nvs_commit(nvs_handle_t h) {
     (void)h; assert(!ssr_on); ++persist_attempts;
+    if (block_storage) {
+        SetEvent(storage_entered);
+        assert(WaitForSingleObject(storage_release, 5000) == WAIT_OBJECT_0);
+    }
     return persist_fail ? ESP_ERR_INVALID_STATE : ESP_OK;
 }
 void nvs_close(nvs_handle_t h) { (void)h; }
@@ -44,6 +54,12 @@ static DWORD WINAPI off_thread(void *arg) {
     shu1_control_release_any();
     shu1_state_update_settings_command(&st);
     SetEvent(completed);
+    return 0;
+}
+
+static DWORD WINAPI storage_thread(void *arg) {
+    (void)arg;
+    shu1_safety_latch_service();
     return 0;
 }
 
@@ -112,6 +128,15 @@ int main(void) {
     assert(!shu1_control_maintenance_begin()); // no overlapping operation
     shu1_control_maintenance_end();
     assert(!shu1_control_maintenance_active());
+    rt.chamber_instant_temp_c=rt.ptc_instant_temp_c=35.0f;
+    shu1_state_update_runtime(&rt);
+    assert(!shu1_control_maintenance_begin()); // OTA still requires cold idle.
+    assert(shu1_control_checkpoint_begin());
+    shu1_control_maintenance_end();
+    rt.ptc_instant_temp_c=45.0f;shu1_state_update_runtime(&rt);
+    assert(!shu1_control_checkpoint_begin());
+    rt.ptc_instant_temp_c=rt.chamber_instant_temp_c=25.0f;
+    shu1_state_update_runtime(&rt);
     shu1_control_guard_end(&guard);
 
     guard = shu1_control_guard_begin();
@@ -158,8 +183,59 @@ int main(void) {
     // Panic is clearable, watchdog inhibit is not.
     shu1_safety_latch_trip_volatile(SHU1_HEATER_PANIC_OFF);
     assert(shu1_safety_latch_clear() == ESP_OK);
-    shu1_safety_latch_inhibit();
+    // Deferred trip cuts immediately without entering NVS. A stalled storage
+    // worker must not own the policy guard needed by OFF or the thermal task.
     int before = persist_attempts;
+    ssr_on = true;
+    shu1_safety_latch_defer_trip(SHU1_HEATER_OVERTEMP);
+    assert(!ssr_on && persist_attempts == before && shu1_safety_latch_is_set());
+    storage_entered = CreateEvent(NULL, TRUE, FALSE, NULL);
+    storage_release = CreateEvent(NULL, TRUE, FALSE, NULL);
+    attempted = CreateEvent(NULL, TRUE, FALSE, NULL);
+    completed = CreateEvent(NULL, TRUE, FALSE, NULL);
+    block_storage = true;
+    worker = CreateThread(NULL, 0, storage_thread, NULL, 0, NULL);
+    assert(WaitForSingleObject(storage_entered, 2000) == WAIT_OBJECT_0);
+    HANDLE off = CreateThread(NULL, 0, off_thread, NULL, 0, NULL);
+    assert(WaitForSingleObject(completed, 2000) == WAIT_OBJECT_0);
+    assert(shu1_safety_latch_is_set());
+    SetEvent(storage_release);
+    assert(WaitForSingleObject(worker, 2000) == WAIT_OBJECT_0);
+    assert(WaitForSingleObject(off, 2000) == WAIT_OBJECT_0);
+    CloseHandle(worker); CloseHandle(off);
+
+    // A new fault while a persisted clear is stalled must win over that clear.
+    rt.last_sensor_ms = test_now_us / 1000;
+    rt.chamber_sensor_status = rt.ptc_sensor_status = SHU1_SENSOR_OK;
+    rt.chamber_instant_temp_c = rt.ptc_instant_temp_c = 25.0f;
+    rt.heater_output_on = false;
+    shu1_state_update_runtime(&rt);
+    shu1_safety_latch_defer_clear();
+    ResetEvent(storage_entered); ResetEvent(storage_release);
+    worker = CreateThread(NULL, 0, storage_thread, NULL, 0, NULL);
+    assert(WaitForSingleObject(storage_entered, 2000) == WAIT_OBJECT_0);
+    guard = shu1_control_guard_begin();
+    shu1_safety_latch_defer_trip(SHU1_HEATER_ZERO_CROSS_LOST);
+    shu1_control_guard_end(&guard);
+    SetEvent(storage_release);
+    assert(WaitForSingleObject(worker, 2000) == WAIT_OBJECT_0);
+    assert(shu1_safety_latch_is_set());
+    assert(shu1_safety_latch_fault() == SHU1_HEATER_ZERO_CROSS_LOST);
+    CloseHandle(worker);
+    block_storage = false;
+    rt.zero_cross_signal_present = true;
+    shu1_state_update_runtime(&rt);
+    persist_fail = true;
+    shu1_safety_latch_defer_clear(); shu1_safety_latch_service();
+    assert(shu1_safety_latch_is_set());
+    persist_fail = false;
+    shu1_safety_latch_defer_clear(); shu1_safety_latch_service();
+    assert(!shu1_safety_latch_is_set() && !shu1_state_get_settings().work_on);
+    CloseHandle(storage_entered); CloseHandle(storage_release);
+    CloseHandle(attempted); CloseHandle(completed);
+
+    shu1_safety_latch_inhibit();
+    before = persist_attempts;
     shu1_safety_latch_request_clear();
     assert(shu1_safety_latch_clear() == ESP_ERR_INVALID_STATE);
     assert(shu1_safety_latch_is_set() && shu1_safety_latch_is_inhibited());

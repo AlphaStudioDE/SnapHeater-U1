@@ -7,6 +7,7 @@
 #include "app_config.h"
 #include "firmware_build_guard.h"
 #include "app_state.h"
+#include "recorder.h"
 #include "wifi_sta.h"
 #include "ntc.h"
 #include "heater.h"
@@ -16,6 +17,8 @@
 #include "ble_control.h"
 #include "event_log.h"
 #include "settings_store.h"
+#include "settings_deferred.h"
+#include "session_journal.h"
 #include "physical_controls.h"
 #include "safety_latch.h"
 #include "control_lease.h"
@@ -54,13 +57,13 @@ static void sanitize_boot_settings(shu1_settings_t *st) {
     st->keep_warm_end_ms = 0;
     st->pickup_active = false;
     st->pickup_pending = false;
-    st->resume_recover_active = false;
     st->session_started_ms = 0;
     st->output_safety_latch_armed = false;
     st->work_mode = SHU1_MODE_AUTO;
 }
 
 void app_main(void) {
+    ESP_ERROR_CHECK(shu1_heater_preinit_off());
     ESP_LOGI(TAG, "%s %s booting", SHU1_FW_NAME, SHU1_FW_VERSION);
     ESP_LOGW(TAG, "Panda Breath hardware build: heater=%s fan-held-gate=%s; boot state is OFF and safety latch is disarmed.",
              CONFIG_SHU1_ENABLE_HEATER_OUTPUT ? "enabled" : "disabled",
@@ -68,8 +71,6 @@ void app_main(void) {
     ESP_LOGI(TAG, "Accepted Panda Breath pins: heater GPIO%d, fan GPIO%d, zero-cross GPIO%d, chamber ADC%d, PTC ADC%d",
              CONFIG_SHU1_HEATER_GPIO, CONFIG_SHU1_FAN_GPIO,
              CONFIG_SHU1_ZERO_CROSS_GPIO, CONFIG_SHU1_CHAMBER_ADC_CH, CONFIG_SHU1_PTC_ADC_CH);
-
-    ESP_ERROR_CHECK(shu1_heater_preinit_off());
 
     esp_err_t ret = nvs_flash_init();
     // Never auto-erase NVS: that could destroy a persisted hazardous-fault latch.
@@ -83,6 +84,7 @@ void app_main(void) {
         ESP_LOGW(TAG, "stock configuration import skipped: %s", esp_err_to_name(ret));
     }
     esp_err_t latch_err = shu1_safety_latch_init();
+    if(shu1_session_journal_init()!=ESP_OK) shu1_safety_latch_inhibit();
     if (latch_err != ESP_OK) {
         ESP_LOGE(TAG, "persistent fault store unreadable; heater remains latched OFF");
     }
@@ -100,8 +102,10 @@ void app_main(void) {
     if (!nvs_ready || ntc_err != ESP_OK) shu1_safety_latch_inhibit();
 
     // Thermal supervision precedes potentially blocking services.
+    if(shu1_settings_deferred_start()!=ESP_OK) shu1_safety_latch_inhibit();
     ESP_ERROR_CHECK(shu1_safety_start());
     ESP_ERROR_CHECK(shu1_safety_wait_healthy(3000));
+    if (shu1_recorder_start()!=ESP_OK) ESP_LOGE(TAG,"History recorder unavailable; thermal control remains active");
 
     if (shu1_ble_start() != ESP_OK) ESP_LOGE(TAG, "BLE unavailable; thermal supervision remains active");
     if (shu1_physical_controls_start() != ESP_OK) ESP_LOGE(TAG, "Panel unavailable; thermal supervision remains active");

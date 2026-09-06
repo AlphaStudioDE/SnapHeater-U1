@@ -141,6 +141,7 @@ int main(void) {
     def test_every_nvs_write_failure_is_reported(self):
         self.compile(COMMON + r'''
 #include "settings_store.h"
+typedef struct {uint32_t version;char ssid[33],password[65];} wifi_record_t;
 typedef int nvs_handle_t;
 static int call, fail_at, closed, logged;
 static int step(void) { return ++call==fail_at ? 99:ESP_OK; }
@@ -149,6 +150,7 @@ static int nvs_set_i32(int h,const char *k,int v) {return step();}
 static int nvs_set_u32(int h,const char *k,uint32_t v) {return step();}
 static int nvs_set_u16(int h,const char *k,uint16_t v) {return step();}
 static int nvs_set_str(int h,const char *k,const char *v) {return step();}
+static int nvs_set_blob(int h,const char *k,const void *v,size_t n) {return step();}
 static int nvs_commit(int h) {return step();}
 static void nvs_close(int h) {++closed;}
 static void shu1_event_log_add(const char *a,const char *b,const char *c) {++logged;}
@@ -289,6 +291,21 @@ static bool config_pending;
 bool shu1_device_config_restart_required(void) {return config_pending;}
 void shu1_device_id(char *out, size_t size) {snprintf(out,size,"AABBCCDDA3F2");}
 bool shu1_wifi_status_json(cJSON *root) {return true;}
+void shu1_settings_deferred_status(bool *pending,bool *ok) {*pending=true;*ok=true;}
+bool shu1_safety_latch_is_set(void) {return true;}
+const char *shu1_safety_latch_clear_block_reason(const shu1_settings_t *s,const shu1_runtime_t *r) {return "";}
+bool shu1_safety_latch_is_inhibited(void) {return false;}
+shu1_heater_fault_t shu1_safety_latch_fault(void) {return SHU1_HEATER_PERSISTED_FAULT;}
+bool shu1_recorder_usage(cJSON *root) {
+ return cJSON_AddBoolToObject(root,"usage_available",true) &&
+ cJSON_AddNumberToObject(root,"usage_heater_ms",18446744073709551615.0) &&
+ cJSON_AddNumberToObject(root,"usage_filter_ms",18446744073709551615.0);
+}
+bool shu1_moonraker_setup_status(cJSON *root) {
+    cJSON_AddStringToObject(root,"ventilation_status","unsupported_fan");
+ cJSON *s=cJSON_AddObjectToObject(root,"printer_setup");
+ return s && cJSON_AddStringToObject(s,"id","0123456789abcdef0123456789abcdef") && cJSON_AddStringToObject(s,"phase","printer_not_ready") && cJSON_AddBoolToObject(s,"key_set",true);
+}
 void shu1_state_get(shu1_state_t *out) {*out=snapshot;}
 int64_t esp_timer_get_time(void) {return 1000000;}
 void shu1_control_snapshot(shu1_control_snapshot_t *out) {memset(out,0,sizeof(*out));}
@@ -303,7 +320,7 @@ static int shu1_ntc_rref_kohm(void) {return 33;}
 int main(void) {
     snapshot.runtime.chamber_temp_c=NAN; snapshot.runtime.ptc_temp_c=INFINITY;
     strcpy(snapshot.printer.active_material,"ABS\"\n\\test");
-    char out[8192];
+    char out[CONFIG_SHU1_BLE_MAX_READ_BYTES];
     for (int diagnostic=0;diagnostic<2;diagnostic++) {
         build_status_json(out,sizeof(out),diagnostic);
         cJSON *root=cJSON_Parse(out);assert(root);
@@ -332,6 +349,13 @@ int main(void) {
     cJSON *stale=cJSON_Parse(out);assert(stale);
     assert(cJSON_IsFalse(cJSON_GetObjectItem(stale,"pr_ready")));
     cJSON_Delete(stale);
+    snapshot.settings.user_paused=true;
+    snapshot.settings.user_pause_started_ms=500;
+    snapshot.settings.drying_end_ms=60500;
+    build_status_json(out,sizeof(out),false);
+    cJSON *paused=cJSON_Parse(out);assert(paused);
+    assert(cJSON_GetObjectItem(paused,"rem")->valueint==60);
+    cJSON_Delete(paused);
     build_status_json(out,40,false);
     cJSON *root=cJSON_Parse(out);assert(root);
     assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(root,"err")),"status_unavailable")==0);

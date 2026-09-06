@@ -3,6 +3,18 @@
 #include <stdbool.h>
 #include <string.h>
 
+// Inspect every field, including duplicates. An authenticated STOP wins over
+// unlock, heartbeat, reset, calibration and any simultaneous ON request.
+static inline bool shu1_stop_requested(const cJSON *root) {
+    for (const cJSON *p = root ? root->child : NULL; p; p=p->next) {
+        if (!p->string) continue;
+        if ((!strcmp(p->string,"work_on") && cJSON_IsFalse(p)) ||
+            ((!strcmp(p->string,"safe_stop") || !strcmp(p->string,"emergency_stop") ||
+              !strcmp(p->string,"disarm_output_safety_latch")) && cJSON_IsTrue(p))) return true;
+    }
+    return false;
+}
+
 static inline bool shu1_reset_request_valid(const cJSON *root) {
     if (!cJSON_IsObject(root)) return false;
     int confirmations = 0, revisions = 0;

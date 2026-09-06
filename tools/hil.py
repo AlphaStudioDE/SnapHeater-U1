@@ -118,6 +118,9 @@ class HttpTransport:
             headers["Content-Type"] = "application/octet-stream"
         if method != "GET":
             headers["X-DragonBreath-Auth"] = self.token
+        if method == "POST" and path in ("/update", "/api/v2/update") and data is not None:
+            import hashlib
+            headers["X-SnapHeater-SHA256"] = hashlib.sha256(data).hexdigest()
         record = {"at": dt.datetime.now(dt.timezone.utc).isoformat(), "tx": {"method": method, "path": path, "bytes": len(data or b"")}}
         self.transcript.write(json.dumps(record) + "\n")
         self.transcript.flush()

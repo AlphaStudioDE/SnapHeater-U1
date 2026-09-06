@@ -4,14 +4,21 @@
  * SPDX-License-Identifier: MIT
  */
 
+// This task must not enter the shared UART/log sink. RAM events remain enabled.
+#define LOG_LOCAL_LEVEL ESP_LOG_NONE
 #include "safety.h"
 #include "safety_rules.h"
 #include "app_config.h"
 #include "app_state.h"
 #include "ntc.h"
+#include "thermal_limits.h"
+#include "sensor_watch.h"
+#include "usage_counters.h"
+#include "symbiont_rules.h"
 #include "heater.h"
 #include "heater_pid.h"
 #include "safety_latch.h"
+#include "session_journal.h"
 #include "control_lease.h"
 #include "fan_triac.h"
 #include "ble_control.h"
@@ -31,7 +38,6 @@ static shu1_heater_fault_t g_last_reported_fault = SHU1_HEATER_OK;
 static char g_last_auto_printer_state[24] = "idle";
 static bool g_auto_print_context_seen = false;
 static bool g_last_printing_for_start_warning = false;
-static bool g_last_pause_for_resume = false;
 static float g_warm_prev_temp = NAN;
 static int64_t g_warm_prev_ms = 0;
 static float g_warm_rate_ema = 0.0f;
@@ -117,7 +123,7 @@ static void start_tempering_if_user_enabled(shu1_settings_t *s, const shu1_runti
     // Tempering is intentionally a user/app option, not an automatic hidden rule.
     // The Android app/REST/BLE must set tempering_enabled=true before print completion
     // if the user wants a controlled post-print temperature ramp-down.
-    if (!s->tempering_enabled) return;
+    if (!s->work_on || !s->tempering_enabled) return;
     if (s->work_mode != SHU1_MODE_AUTO) return;
     if (s->tempering_phase == SHU1_TEMPERING_ACTIVE) return;
     if (!g_auto_print_context_seen) return;
@@ -265,7 +271,7 @@ static bool auto_mode_heater_allowed(const shu1_settings_t *s, const shu1_printe
 }
 
 static void update_auto_context(shu1_settings_t *s, const shu1_printer_state_t *p, const shu1_runtime_t *rt, int64_t now_ms) {
-    if (s->work_mode != SHU1_MODE_AUTO) {
+    if (!s->work_on || s->work_mode != SHU1_MODE_AUTO) {
         g_auto_print_context_seen = false;
         snprintf(g_last_auto_printer_state, sizeof(g_last_auto_printer_state), "%s", p->normalized_state);
         return;
@@ -284,7 +290,7 @@ static void update_auto_context(shu1_settings_t *s, const shu1_printer_state_t *
         } else if (s->finish_conditioning_mode == SHU1_FINISH_KEEP_WARM) {
             s->keep_warm_active = true;
             s->keep_warm_end_ms = now_ms + ((int64_t)s->keep_warm_max_min * 60 * 1000);
-            s->work_on = true;
+            // Continue an existing job only. Print completion must never perform ON.
             shu1_event_log_add("info", "finish_keep_warm", "AUTO print completed; keep-warm conditioning started by user option");
             shu1_ble_notify_status_now();
         } else {
@@ -523,7 +529,7 @@ static void update_material_assistant(shu1_settings_t *s, shu1_runtime_t *rt, co
     } else if (detected == SHU1_PROFILE_PLA) {
         snprintf(rt->material_advice, sizeof(rt->material_advice), "PLA detected: use conservative chamber temperature; avoid overheating soft PLA parts.");
     } else if (detected == SHU1_PROFILE_ABS || detected == SHU1_PROFILE_ASA) {
-        snprintf(rt->material_advice, sizeof(rt->material_advice), "%s detected: anti-warp, preheat and optional tempering are recommended.", shu1_profile_name(detected));
+        snprintf(rt->material_advice, sizeof(rt->material_advice), "%s detected: preheat and optional tempering are recommended.", shu1_profile_name(detected));
     } else if (detected == SHU1_PROFILE_PETG) {
         snprintf(rt->material_advice, sizeof(rt->material_advice), "PETG detected: moderate chamber heat and stable airflow are recommended.");
     } else if (detected == SHU1_PROFILE_NYLON || detected == SHU1_PROFILE_PC) {
@@ -669,6 +675,7 @@ static void update_energy_and_stability(shu1_runtime_t *rt, bool request_heat, b
     static bool was_printing_context = false;
     if (last_ms <= 0) last_ms = now_ms;
     int64_t dt = now_ms - last_ms;
+    const int64_t usage_dt = dt;
     if (dt < 0 || dt > 5000) dt = SHU1_CONTROL_PERIOD_MS;
     last_ms = now_ms;
 
@@ -676,9 +683,8 @@ static void update_energy_and_stability(shu1_runtime_t *rt, bool request_heat, b
         rt->heater_on_accum_ms += (uint64_t)dt;
         rt->session_heater_on_ms += (uint64_t)dt;
     }
-    if (request_fan) {
-        rt->fan_on_accum_ms += (uint64_t)dt;
-    }
+    (void)request_fan;
+    shu1_usage_accumulate(rt, usage_dt, esp_timer_get_time() / 1000);
     rt->estimated_energy_wh = ((float)rt->heater_on_accum_ms / 3600000.0f) * (float)SHU1_ENERGY_HEATER_WATT;
     rt->session_energy_wh = ((float)rt->session_heater_on_ms / 3600000.0f) * (float)SHU1_ENERGY_HEATER_WATT;
 
@@ -832,15 +838,14 @@ static void update_airflow_detection(shu1_settings_t *st, shu1_runtime_t *rt, bo
     g_airflow_start_ptc = rt->ptc_temp_c;
 }
 
-static void update_print_risk_and_start_warnings(shu1_settings_t *st, shu1_runtime_t *rt, const shu1_printer_state_t *pr, int target, int64_t now_ms) {
+static void update_print_risk_and_start_warnings(shu1_settings_t *st, shu1_runtime_t *rt, const shu1_printer_state_t *pr, int target) {
     bool printing = printer_state_is_printing(pr);
     int detected = profile_from_printer_material(pr->active_material);
     int risk = 0;
     if (detected == SHU1_PROFILE_ABS || detected == SHU1_PROFILE_ASA) {
         if (target < 50) risk += 40;
         if (!st->heat_soak_enabled || !rt->heat_soak_ready) risk += 20;
-        if (!st->anti_warp_enabled) risk += 15;
-        snprintf(rt->print_risk_message, sizeof(rt->print_risk_message), "%s: use high chamber temp, heat soak, anti-warp and optional tempering", shu1_profile_name(detected));
+        snprintf(rt->print_risk_message, sizeof(rt->print_risk_message), "%s: use high chamber temp, heat soak and optional tempering", shu1_profile_name(detected));
     } else if (detected == SHU1_PROFILE_PLA) {
         if (target > SHU1_PLA_PROTECTION_MAX_C) risk += 75;
         snprintf(rt->print_risk_message, sizeof(rt->print_risk_message), "PLA: high chamber temperature can soften PLA; keep chamber conservative");
@@ -851,7 +856,6 @@ static void update_print_risk_and_start_warnings(shu1_settings_t *st, shu1_runti
         if (target > 55) risk += 25;
         snprintf(rt->print_risk_message, sizeof(rt->print_risk_message), "Material unknown: use conservative chamber settings");
     }
-    if (st->large_print_protection_enabled) risk -= 10;
     if (risk < 0) risk = 0;
     if (risk > 100) risk = 100;
     st->print_risk_score = risk;
@@ -880,18 +884,6 @@ static void update_print_risk_and_start_warnings(shu1_settings_t *st, shu1_runti
     }
     g_last_printing_for_start_warning = printing;
 
-    bool paused = printer_state_is_pause_or_error(pr);
-    if (st->smart_resume_enabled && g_last_pause_for_resume && printing && !paused) {
-        st->resume_recover_active = true;
-        st->resume_recover_end_ms = now_ms + ((int64_t)st->resume_recover_min * 60 * 1000);
-        shu1_event_log_add("info", "smart_resume_recover", "print resumed; short chamber recovery window active");
-    }
-    if (st->resume_recover_active && now_ms >= st->resume_recover_end_ms) {
-        st->resume_recover_active = false;
-        st->resume_recover_end_ms = 0;
-        shu1_event_log_add("info", "smart_resume_recover_complete", "resume recovery window completed");
-    }
-    g_last_pause_for_resume = paused;
 }
 
 static void update_safety_score(shu1_settings_t *st, shu1_runtime_t *rt, const shu1_printer_state_t *pr) {
@@ -904,7 +896,7 @@ static void update_safety_score(shu1_settings_t *st, shu1_runtime_t *rt, const s
     if (st->filter_life_counter_enabled) score += 10;
     if (st->airflow_detection_enabled) score += 10;
     if (st->virtual_door_detection_enabled || st->door_sensor_enabled) score += 10;
-    if (st->safe_overnight_enabled || st->manual_session_max_min > 0) score += 5;
+    if (st->manual_session_max_min > 0) score += 5;
     if (score > 100) score = 100;
     st->safety_score = score;
     rt->safety_score = score;
@@ -1033,14 +1025,14 @@ static void update_v14_symbiont(shu1_settings_t *st, shu1_runtime_t *rt, const s
         snprintf(rt->symbiont_status, sizeof(rt->symbiont_status), "%s", "U1 Symbiont Mode disabled; read-only Moonraker observation active");
         return;
     }
-    if (st->symbiont_policy == SHU1_SYMBIONT_POLICY_READ_ONLY || !st->symbiont_ventilation_allowed) {
+    if (!st->symbiont_ventilation_allowed || !st->symbiont_safe_control_enabled ||
+        st->symbiont_policy!=SHU1_SYMBIONT_POLICY_CLIMATE_SAFE) {
         snprintf(rt->symbiont_status, sizeof(rt->symbiont_status), "%s", "U1 Symbiont Mode active in read-only cooperation; no printer writes allowed");
         return;
     }
     snprintf(rt->symbiont_status, sizeof(rt->symbiont_status),
-             "U1 Symbiont Mode climate-safe policy armed=%d moonraker=%d; future writes limited to whitelisted ventilation objects only",
-             st->symbiont_safe_control_enabled ? 1 : 0, pr->moonraker_connected ? 1 : 0);
-    st->symbiont_notification_pending = true;
+             "Symbiont requested=%d%% Moonraker=%s; printer feedback required",
+             rt->symbiont_fan_percent, pr->moonraker_connected ? "online" : "offline");
 }
 
 static void update_v14_notifications(shu1_settings_t *st, shu1_runtime_t *rt, int64_t now_ms) {
@@ -1074,10 +1066,10 @@ static void update_v14_productization(shu1_settings_t *st, shu1_runtime_t *rt, s
 
 static void update_v13_extended_features(shu1_settings_t *st, shu1_runtime_t *rt, shu1_printer_state_t *pr, bool request_heat, bool request_fan, int target, int64_t now_ms) {
     update_warmup_prediction(st, rt, request_heat, target, now_ms);
-    update_heat_soak(st, rt, target, now_ms);
+    if (!st->user_paused) update_heat_soak(st, rt, target, now_ms);
     update_filter_and_wear(st, rt);
     update_airflow_detection(st, rt, request_heat, now_ms);
-    update_print_risk_and_start_warnings(st, rt, pr, target, now_ms);
+    update_print_risk_and_start_warnings(st, rt, pr, target);
     update_safety_score(st, rt, pr);
 }
 
@@ -1096,6 +1088,9 @@ static void control_task(void *arg) {
     bool zc_seen_while_armed = false;
     uint64_t zc_gap_count = shu1_fan_triac_zero_cross_stats().signal_gap_count;
     bool thermal_purge = true;
+    shu1_sensor_watch_t sensor_watch = {0};
+    shu1_sample_health_t previous_sample_health = SHU1_SAMPLE_HEALTHY;
+    uint32_t auto_context_epoch = UINT32_MAX;
     while (true) {
         SHU1_CONTROL_GUARD(policy_guard);
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -1103,6 +1098,12 @@ static void control_task(void *arg) {
         shu1_runtime_t rt = shu1_state_get_runtime();
         shu1_settings_t st = shu1_state_get_settings();
         const uint32_t command_epoch = shu1_state_command_epoch();
+        // Do not carry a completion edge across OFF/new commands between ticks.
+        if (auto_context_epoch != command_epoch) {
+            g_auto_print_context_seen = false;
+            snprintf(g_last_auto_printer_state, sizeof(g_last_auto_printer_state), "idle");
+            auto_context_epoch = command_epoch;
+        }
         shu1_printer_state_t pr = shu1_state_get_printer();
         shu1_control_snapshot_t ctl_snapshot;
         shu1_control_snapshot(&ctl_snapshot);
@@ -1120,9 +1121,15 @@ static void control_task(void *arg) {
             }
             shu1_control_snapshot(&ctl_snapshot);
         }
-        (void)shu1_safety_latch_retry_persist();
+        // Fault persistence/retry runs in the storage task, never this loop.
 
-        if (shu1_ntc_read(&sample) == ESP_OK) {
+        const int64_t acquisition_attempt_us = esp_timer_get_time();
+        const bool read_ok = shu1_ntc_read(&sample) == ESP_OK;
+        const int64_t acquisition_now_us = esp_timer_get_time();
+        const bool sample_fresh = read_ok && shu1_sample_fresh(&sensor_watch,
+            &sample, acquisition_attempt_us, acquisition_now_us);
+        if (!sample_fresh) shu1_heater_cut_power();
+        if (read_ok) {
             rt.chamber_temp_c = sample.chamber_c;
             rt.ptc_temp_c = sample.ptc_c;
             rt.chamber_instant_temp_c = sample.chamber_instant_c;
@@ -1131,31 +1138,37 @@ static void control_task(void *arg) {
             rt.ptc_raw = sample.ptc_raw;
             rt.chamber_sensor_status = sample.chamber_status;
             rt.ptc_sensor_status = sample.ptc_status;
-            rt.last_sensor_ms = now_ms;
+            if (sample_fresh) rt.last_sensor_ms = sample.completed_us / 1000;
         } else {
             rt.chamber_instant_temp_c = NAN;
             rt.ptc_instant_temp_c = NAN;
             rt.chamber_sensor_status = SHU1_SENSOR_INVALID;
             rt.ptc_sensor_status = SHU1_SENSOR_INVALID;
         }
+        if (!sample_fresh)
+            rt.chamber_sensor_status = rt.ptc_sensor_status = SHU1_SENSOR_INVALID;
 
         // Mode priority: Preheat, Drying, Dry-Out, Health Test and Manual are user-driven and never require U1 printing.
+        bool preheat_completed_now = false, dryout_completed_now = false, health_done_now = false;
+        if (!st.user_paused) {
         update_material_assistant(&st, &rt, &pr);
         update_scheduled_preheat(&st, now_ms);
         update_pause_policy(&st, &pr, now_ms);
-        bool preheat_completed_now = preheat_update(&st, &rt, now_ms);
-        bool dryout_completed_now = dryout_update(&st, now_ms);
-        bool health_done_now = health_test_update(&st, &rt, now_ms);
+        preheat_completed_now = preheat_update(&st, &rt, now_ms);
+        dryout_completed_now = dryout_update(&st, now_ms);
+        health_done_now = health_test_update(&st, &rt, now_ms);
         update_auto_context(&st, &pr, &rt, now_ms);
         update_tempering(&st, now_ms);
+        }
         (void)update_virtual_door_detection(&st, &rt, &pr, now_ms);
 
         if (dryout_completed_now) {
             rt.heater_fault = SHU1_HEATER_DRYOUT_COMPLETE;
         } else if (health_done_now) {
             rt.heater_fault = st.health_test_result == SHU1_HEALTH_RESULT_OK ? SHU1_HEATER_HEALTH_TEST_COMPLETE : SHU1_HEATER_HEALTH_TEST_FAILED;
-        } else if (drying_timer_expired(&st, now_ms)) {
+        } else if (!st.user_paused && drying_timer_expired(&st, now_ms)) {
             rt.heater_fault = SHU1_HEATER_DRYING_TIMER_EXPIRED;
+            shu1_event_log_add("info","drying_complete","filament drying timer completed");
         } else if (preheat_completed_now) {
             rt.heater_fault = SHU1_HEATER_PREHEAT_COMPLETE;
         } else if (update_session_watchdog(&st, now_ms)) {
@@ -1164,36 +1177,57 @@ static void control_task(void *arg) {
             rt.heater_fault = SHU1_HEATER_OK;
         }
 
+        if (!st.work_on) { st.user_paused = false; st.user_pause_started_ms = 0; }
         int target = effective_target_for_settings(&st);
         if (target > SHU1_VALIDATION_MAX_TARGET_C) target = SHU1_VALIDATION_MAX_TARGET_C;
         rt.heater_effective_target_c = target;
+        if (!st.work_on && !sensor_watch.frozen) {
+            sensor_watch.warning_us = 0;
+            sensor_watch.tracking = false;
+        }
+        const shu1_sample_health_t sample_health = shu1_sensor_watch_step(&sensor_watch,
+            &sample, sample_fresh, st.work_on && !st.user_paused && target > 0,
+            rt.heater_output_on, acquisition_now_us);
+        rt.sensor_freeze_warning_ms = sample_health == SHU1_SAMPLE_WARNING ? sensor_watch.warning_us / 1000 : 0;
+        rt.sensor_freeze_remaining_s = sample_health == SHU1_SAMPLE_WARNING ?
+            (int)((sensor_watch.warning_us + SHU1_RAW_WARNING_GRACE_US - acquisition_now_us + 999999) / 1000000) : 0;
+        if (sample_health == SHU1_SAMPLE_WARNING && previous_sample_health != SHU1_SAMPLE_WARNING)
+            shu1_event_log_add("warn", "sensor_freeze_warning", "suspected frozen readings; autonomous stop in 5 minutes unless readings recover");
+        if (sample_health == SHU1_SAMPLE_HEALTHY && previous_sample_health == SHU1_SAMPLE_WARNING)
+            shu1_event_log_add("info", "sensor_freeze_ended", "raw readings changed or heating stopped; warning ended");
+        if (sample_health != SHU1_SAMPLE_HEALTHY && sample_health != SHU1_SAMPLE_WARNING) {
+            // Cut SSR before any diagnostic logging, persistence or mode output.
+            shu1_heater_cut_power();
+            rt.chamber_sensor_status = rt.ptc_sensor_status = SHU1_SENSOR_INVALID;
+            if (sample_health != previous_sample_health &&
+                (sample_health == SHU1_SAMPLE_STALE || sample_health == SHU1_SAMPLE_FROZEN)) {
+                shu1_event_log_add("critical",
+                    sample_health == SHU1_SAMPLE_STALE ? "sensor_sample_stale" : "sensor_raw_frozen",
+                    sample_health == SHU1_SAMPLE_STALE ? "ADC acquisition freshness check failed" :
+                    "both raw ADC readings invariant despite normal SSR cycling; heating stopped");
+            }
+        }
+        previous_sample_health = sample_health;
         rt.heater_commanded_duty = 0.0f;
         rt.heater_approach_limit = 0.0f;
         snprintf(rt.heater_constraint, sizeof(rt.heater_constraint), "off");
         bool sensor_ok = rt.chamber_sensor_status == SHU1_SENSOR_OK && rt.ptc_sensor_status == SHU1_SENSOR_OK &&
                          isfinite(rt.chamber_instant_temp_c) && isfinite(rt.ptc_instant_temp_c);
+        const float chamber_safety=shu1_safety_temperature(sample.chamber_instant_c,shu1_ntc_get_offset_c(0));
+        const float ptc_safety=shu1_safety_temperature(sample.ptc_instant_c,shu1_ntc_get_offset_c(1));
+        sensor_ok = sensor_ok && isfinite(chamber_safety) && isfinite(ptc_safety);
         bool chamber_overtemp = sample.chamber_status == SHU1_SENSOR_OK &&
                                 isfinite(sample.chamber_instant_c) &&
-                                sample.chamber_instant_c >= SHU1_CHAMBER_HARD_CUTOFF_C;
+                                chamber_safety >= SHU1_CHAMBER_HARD_CUTOFF_C;
         bool ptc_hard_overtemp = sample.ptc_status == SHU1_SENSOR_OK &&
                                  isfinite(sample.ptc_instant_c) &&
-                                 sample.ptc_instant_c >= SHU1_PTC_HARD_CUTOFF_C;
-        float board_foldback_cut_c = shu1_ntc_rref_kohm() == 33
-            ? SHU1_PTC_FOLDBACK_33K_CUT_C : SHU1_PTC_FOLDBACK_82K_CUT_C;
-        float board_foldback_resume_c = shu1_ntc_rref_kohm() == 33
-            ? SHU1_PTC_FOLDBACK_33K_RESUME_C : SHU1_PTC_FOLDBACK_82K_RESUME_C;
-        float configured_foldback_cut_c = (float)st.ptc_cutoff_c;
-        if (configured_foldback_cut_c > 0.0f && configured_foldback_cut_c < 90.0f)
-            configured_foldback_cut_c = 90.0f;
-        if (configured_foldback_cut_c > 104.0f) configured_foldback_cut_c = 104.0f;
-        float foldback_cut_c = configured_foldback_cut_c > 0.0f
-            ? configured_foldback_cut_c : board_foldback_cut_c;
-        float foldback_resume_c = configured_foldback_cut_c > 0.0f
-            ? configured_foldback_cut_c - 3.0f : board_foldback_resume_c;
+                                 ptc_safety >= SHU1_PTC_HARD_CUTOFF_C;
+        float foldback_cut_c = shu1_foldback_limit(shu1_ntc_rref_kohm(),st.ptc_cutoff_c);
+        float foldback_resume_c = foldback_cut_c - 3.0f;
         if (sample.ptc_status == SHU1_SENSOR_OK && isfinite(sample.ptc_instant_c)) {
             bool previous_foldback = g_ptc_foldback_active;
-            if (sample.ptc_instant_c >= foldback_cut_c) g_ptc_foldback_active = true;
-            else if (sample.ptc_instant_c < foldback_resume_c) g_ptc_foldback_active = false;
+            if (ptc_safety >= foldback_cut_c) g_ptc_foldback_active = true;
+            else if (ptc_safety < foldback_resume_c) g_ptc_foldback_active = false;
             if (g_ptc_foldback_active != previous_foldback) {
                 shu1_event_log_add("info", g_ptc_foldback_active ? "ptc_foldback_on" : "ptc_foldback_off",
                                    g_ptc_foldback_active ? "PTC SSR foldback cut active" : "PTC SSR foldback released");
@@ -1203,6 +1237,14 @@ static void control_task(void *arg) {
         bool request_heat = false;
         bool request_fan = false;
         bool pid_active = false;
+        const bool symbiont_active = st.symbiont_mode_enabled && st.symbiont_ventilation_allowed &&
+            st.symbiont_safe_control_enabled && st.symbiont_policy==SHU1_SYMBIONT_POLICY_CLIMATE_SAFE &&
+            st.work_on && !st.user_paused && target>0 && sensor_ok &&
+            !chamber_overtemp && !ptc_hard_overtemp && !shu1_safety_latch_is_set() &&
+            !shu1_control_maintenance_active();
+        if (!symbiont_active) rt.symbiont_cooling=false;
+        rt.symbiont_fan_percent = symbiont_active ?
+            shu1_symbiont_curve(&rt.symbiont_cooling,rt.chamber_instant_temp_c,(float)target):0;
 
         if (!CONFIG_SHU1_ENABLE_HEATER_OUTPUT && rt.heater_fault == SHU1_HEATER_OK) {
             rt.heater_fault = SHU1_HEATER_DISABLED_BY_BUILD;
@@ -1211,8 +1253,7 @@ static void control_task(void *arg) {
             rt.heater_fault = SHU1_HEATER_OVERTEMP;
         } else if (!sensor_ok) {
             rt.heater_fault = SHU1_HEATER_SENSOR_FAULT;
-        } else if (st.work_on && target > 0) {
-            if (st.safe_overnight_enabled && target > 55) target = 55;
+        } else if (st.work_on && !st.user_paused && target > 0) {
             bool mode_allowed = true;
             if (st.work_mode == SHU1_MODE_AUTO) {
                 mode_allowed = auto_mode_heater_allowed(&st, &pr, now_ms);
@@ -1221,7 +1262,8 @@ static void control_task(void *arg) {
             if (mode_allowed) {
                 request_fan = true; // Airflow throughout heat mode, including SSR-off/foldback windows.
                 float duty = 0.0f;
-                const bool inhibited = g_ptc_foldback_active ||
+                const bool inhibited = g_ptc_foldback_active || rt.symbiont_cooling ||
+                    !shu1_session_journal_ready() ||
                     (st.output_safety_latch_enabled && !rt.output_safety_latch_ready) ||
                     shu1_safety_latch_is_set() || shu1_safety_latch_is_inhibited() ||
                     shu1_control_maintenance_active() || !wdt_armed ||
@@ -1306,22 +1348,21 @@ static void control_task(void *arg) {
             zc_lost ||
             (rt.heater_fault == SHU1_HEATER_SENSOR_FAULT && active_or_armed_heat);
         if (persistent_hazard && !shu1_safety_latch_is_set()) {
-            (void)shu1_safety_latch_trip(rt.heater_fault);
+            shu1_safety_latch_defer_trip(rt.heater_fault);
             rt.heater_output_on = false;
             shu1_event_log_add("critical", "heater_fault_latched",
-                               "hazardous heater fault persisted; explicit safe clear required");
+                               "hazardous heater fault latched; persistence queued; explicit safe clear required");
         }
-        if (!shu1_safety_latch_is_inhibited() && shu1_safety_latch_clear_requested() && !st.work_on && sensor_ok &&
+        const bool clear_requested = shu1_safety_latch_take_clear_request();
+        if (!shu1_safety_latch_is_inhibited() && clear_requested && !st.work_on && sensor_ok &&
             (shu1_safety_latch_fault() != SHU1_HEATER_ZERO_CROSS_LOST || zc_present) &&
             !chamber_overtemp && !ptc_hard_overtemp) {
-            if (shu1_safety_latch_clear() == ESP_OK) {
-                rt.heater_fault = SHU1_HEATER_OK;
-                shu1_event_log_add("info", "heater_fault_cleared",
-                                   "persistent heater fault cleared after safe-state validation");
-            }
+            shu1_safety_latch_defer_clear();
         }
         if (shu1_safety_latch_is_set()) {
             rt.heater_fault = shu1_safety_latch_fault();
+            rt.sensor_freeze_warning_ms = 0;
+            rt.sensor_freeze_remaining_s = 0;
             shu1_settings_stop(&st);
             request_heat = false;
             request_fan = true; // Fault airflow is independent of purge history.
@@ -1362,6 +1403,7 @@ static void control_task(void *arg) {
         const bool faulted = shu1_safety_latch_is_set() || shu1_safety_latch_is_inhibited();
         request_heat = shu1_safety_heat_allowed(request_heat,
             shu1_control_maintenance_active(), wdt_armed, faulted);
+        request_heat = request_heat && shu1_session_journal_ready();
         request_fan = shu1_safety_airflow(request_fan, heat_mode, faulted);
         // Final governors also govern the reported admitted command. Do not
         // confuse an ordinary OFF portion of the SSR window with an inhibit.
@@ -1388,14 +1430,19 @@ static void control_task(void *arg) {
             request_heat = false;
             request_fan = true;
         }
+        if (st.user_paused) request_heat = false;
         shu1_heater_set(request_heat, request_fan);
         shu1_control_guard_end(&policy_guard);
         report_fault_change(rt.heater_fault);
 
         // Set only after one complete fail-closed sensor/safety/output pass.
         if (wdt_armed) {
-            g_control_task_healthy = true;
-            ESP_ERROR_CHECK(esp_task_wdt_reset());
+            if(esp_task_wdt_reset()==ESP_OK) g_control_task_healthy=true;
+            else {
+                shu1_heater_cut_power();
+                shu1_safety_latch_inhibit();
+                g_control_task_healthy=false;
+            }
         }
 
         // Commands from HTTP/BLE/buttons wake this task so an OFF/latch request

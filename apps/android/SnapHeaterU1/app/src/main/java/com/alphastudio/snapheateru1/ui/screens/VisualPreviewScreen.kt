@@ -78,6 +78,7 @@ fun VisualPreviewScreen(onExit: () -> Unit) {
                     })
                 AppTab.Safety -> SafetyScreen(sample, onApplySafety = { _, _, _ -> })
                 AppTab.Diagnostics -> DiagnosticsScreen(sample)
+                AppTab.History -> ScreenColumn { Text(previewNote) }
                 AppTab.Settings -> ScreenColumn {
                     Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium)
                     LanguagePicker()

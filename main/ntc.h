@@ -9,11 +9,18 @@
 #include "app_state.h"
 #include "esp_err.h"
 
+#define SHU1_NTC_RAW_OPEN_MIN 0xFFEU
+#define SHU1_NTC_RAW_SHORT_MAX 0x14U
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct {
+    /* Acquisition provenance, stamped by the ADC producer, never by its consumer. */
+    uint32_t sequence;
+    int64_t started_us;
+    int64_t completed_us;
     /* Smoothed values reproduce DragonBreath's five-sample control/telemetry path. */
     float chamber_c;
     float ptc_c;

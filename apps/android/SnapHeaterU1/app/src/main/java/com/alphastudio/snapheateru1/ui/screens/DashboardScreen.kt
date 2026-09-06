@@ -30,13 +30,46 @@ fun DashboardScreen(
     telemetryFresh: Boolean = false,
     onStart: () -> Unit = {},
     onSafeStop: () -> Unit = {},
+    onPause: () -> Unit = {},
+    pauseEnabled: Boolean = false,
     stopPending: Boolean = false,
+    clearPending: Boolean = false,
+    clearEnabled: Boolean = false,
+    clearMessage: String = "",
+    onClearFault: () -> Unit = {},
 ) {
     val stopped = snapshot.mode == AppMode.SafeStop
     ScreenColumn {
         Text(stringResource(R.string.daily_title), style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold)
         Text(stringResource(R.string.daily_intro), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (snapshot.faultLatched || snapshot.faultInhibited || clearMessage.isNotBlank()) {
+            Card(modifier=Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                    if(snapshot.faultLatched || snapshot.faultInhibited) {
+                        Text(stringResource(R.string.fault_clear_title),fontWeight=FontWeight.Bold)
+                        Text(stringResource(R.string.fault_clear_intro))
+                        Text(snapshot.faultReason)
+                        val reason=when(snapshot.faultClearBlockReason) {
+                            "inhibited" -> R.string.fault_clear_inhibited
+                            "sensors" -> R.string.fault_clear_sensors
+                            "temperature" -> R.string.fault_clear_temperature
+                            "zero_cross" -> R.string.fault_clear_zc
+                            "busy" -> R.string.fault_clear_busy
+                            else -> null
+                        }
+                        if(reason!=null) Text(stringResource(reason))
+                        Button(onClick=onClearFault,enabled=telemetryFresh && clearEnabled &&
+                            snapshot.faultClearSupported && !snapshot.faultInhibited && !clearPending,
+                            modifier=Modifier.fillMaxWidth()) {
+                            ActionLabel(Icons.Outlined.RestartAlt,stringResource(
+                                if(clearPending) R.string.fault_clear_pending else R.string.fault_clear_action))
+                        }
+                    }
+                    if(clearMessage.isNotBlank()) Text(clearMessage)
+                }
+            }
+        }
         Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.dashboard_chamber), style = MaterialTheme.typography.labelLarge)
@@ -50,7 +83,7 @@ fun DashboardScreen(
                 if (stopPending) {
                     Text(stringResource(R.string.heating_stopping), style = MaterialTheme.typography.titleLarge)
                 } else if (telemetryFresh) {
-                    Text(stringResource(snapshot.mode.labelRes()), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(if (snapshot.paused) R.string.job_paused else snapshot.mode.labelRes()), style = MaterialTheme.typography.titleLarge)
                     Text(stringResource(if (snapshot.fanOn && stopped) R.string.heating_cooling
                         else if (snapshot.fanOn) R.string.daily_fan_on else R.string.daily_fan_off),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -68,6 +101,11 @@ fun DashboardScreen(
         }
         Button(onClick = onStart, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
             ActionLabel(Icons.Outlined.Widgets, stringResource(R.string.daily_choose))
+        }
+        OutlinedButton(onClick = onPause, enabled = pauseEnabled && !stopped,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+            ActionLabel(if (snapshot.paused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                stringResource(if (snapshot.paused) R.string.job_resume else R.string.job_pause))
         }
         OutlinedButton(onClick = onSafeStop, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
             ActionLabel(Icons.Outlined.PowerSettingsNew, stringResource(R.string.daily_stop))

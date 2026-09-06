@@ -21,16 +21,61 @@ class SnapHeaterApiClient(baseUrl: String, private val controlToken: String = ""
 
     fun status(): JSONObject = request("GET", "/api/status")
     fun verifyAccess(): JSONObject = request("GET", "/api/v2/auth")
+    fun otaInfo(): JSONObject = request("GET", "/api/v2/ota")
+    fun history(after: Long): JSONObject {
+        require(after in 0..4294967295L)
+        return request("GET","/api/history?after=$after",responseLimit=8192)
+    }
+    fun notifications(): JSONObject = request("GET", "/api/events").getJSONObject("notifications")
+
+    /** Never retry an upload automatically: a lost reply may mean the device already rebooted. */
+    fun uploadFirmware(image: ByteArray, expectedDevice: String, progress: (Float) -> Unit): JSONObject {
+        require(controlToken.length in 16..64) { "REST authentication required" }
+        verifyAccess()
+        val state = status()
+        require(state.optString("device_id").equals(expectedDevice, ignoreCase=true)) { "Device identity changed" }
+        val info=otaInfo().getJSONObject("ota")
+        require(info.optBoolean("enabled")) { "OTA disabled by firmware" }
+        require(image.size>32 && image.size<=info.optInt("inactive_capacity") && image[0].toInt() and 255 == 0xE9) { "Invalid image size or header" }
+        val hash=java.security.MessageDigest.getInstance("SHA-256").digest(image).joinToString("") { "%02x".format(it) }
+        val connection=(URL("$rootUrl/api/v2/update").openConnection() as HttpURLConnection).apply {
+            requestMethod="POST"; connectTimeout=5000; readTimeout=70000
+            instanceFollowRedirects=false
+            doOutput=true
+            setFixedLengthStreamingMode(image.size)
+            setRequestProperty("Content-Type","application/octet-stream")
+            setRequestProperty("X-DragonBreath-Auth",controlToken)
+            setRequestProperty("X-SnapHeater-SHA256",hash)
+        }
+        try {
+            connection.outputStream.use { output ->
+                var offset=0
+                while(offset<image.size) {
+                    val count=minOf(4096,image.size-offset)
+                    output.write(image,offset,count); offset+=count
+                    progress(offset.toFloat()/image.size)
+                }
+            }
+            val code=connection.responseCode
+            val stream=if(code in 200..299) connection.inputStream else connection.errorStream
+            val body=stream?.bufferedReader()?.use { readBoundedResponse(it,8192) }.orEmpty()
+            if(code !in 200..299) throw SnapHeaterApiException("OTA HTTP $code: "+runCatching { JSONObject(body).optString("error") }.getOrDefault(""))
+            val reply=JSONObject(body)
+            check(reply.optBoolean("ok") && reply.optString("sha256").equals(hash,true)) { "Upload confirmation missing or hash mismatch; check device before retry" }
+            return reply
+        } finally { connection.disconnect() }
+    }
 
     fun postSettings(payload: JSONObject): JSONObject = request("POST", "/api/settings", payload)
 
     fun heartbeat(leaseId: String): JSONObject =
         request("POST", "/api/v2/heartbeat", JSONObject().put("lease_id", leaseId))
 
-    private fun request(method: String, path: String, body: JSONObject? = null): JSONObject {
+    private fun request(method: String, path: String, body: JSONObject? = null, responseLimit: Int=131072): JSONObject {
         val connection = try {
             (URL("$rootUrl$path").openConnection() as HttpURLConnection).apply {
                 requestMethod = method
+                instanceFollowRedirects = false
                 connectTimeout = 3000
                 readTimeout = 5000
                 setRequestProperty("Accept", "application/json")
@@ -53,7 +98,17 @@ class SnapHeaterApiClient(baseUrl: String, private val controlToken: String = ""
 
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { reader ->
+                val result=StringBuilder()
+                val buffer=CharArray(1024)
+                while(true) {
+                    val count=reader.read(buffer)
+                    if(count<0) break
+                    if(result.length+count>responseLimit) throw SnapHeaterApiException("Response exceeds limit")
+                    result.append(buffer,0,count)
+                }
+                result.toString()
+            }.orEmpty()
             if (code !in 200..299) {
                 throw SnapHeaterApiException("Firmware returned HTTP $code")
             }

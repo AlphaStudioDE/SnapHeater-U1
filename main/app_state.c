@@ -9,6 +9,8 @@
 #include "control_lease.h"
 #include "safety_latch.h"
 #include "fan_triac.h"
+#include "ntc.h"
+#include "thermal_limits.h"
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
@@ -68,6 +70,18 @@ bool shu1_control_maintenance_begin(void) {
     return true;
 }
 void shu1_control_maintenance_end(void) { g_maintenance = false; }
+bool shu1_control_checkpoint_begin(void) {
+    // Small settings checkpoints, NOT OTA: allow a warm room, but no heat,
+    // scheduled/paused work, active blower/purge, fault or stale sensors.
+    shu1_runtime_t rt=shu1_state_get_runtime();
+    int64_t age=esp_timer_get_time()/1000-rt.last_sensor_ms;
+    if (shu1_safety_latch_is_set() || shu1_safety_latch_is_inhibited() ||
+        rt.last_sensor_ms<=0 || age<0 || age>1500 ||
+        rt.chamber_sensor_status!=SHU1_SENSOR_OK || rt.ptc_sensor_status!=SHU1_SENSOR_OK ||
+        !(shu1_safety_temperature(rt.chamber_instant_temp_c,shu1_ntc_get_offset_c(0))<45.0f) ||
+        !(shu1_safety_temperature(rt.ptc_instant_temp_c,shu1_ntc_get_offset_c(1))<45.0f)) return false;
+    return shu1_control_network_setup_begin();
+}
 bool shu1_control_network_setup_begin(void) {
     // Networking cannot change an active task; the thermal loop keeps running.
     // Unlike OTA, Wi-Fi setup does not require a room colder than 30 C.
@@ -80,6 +94,8 @@ bool shu1_control_network_setup_begin(void) {
     return true;
 }
 void shu1_settings_stop(shu1_settings_t *st) {
+    st->user_paused = false;
+    st->user_pause_started_ms = 0;
     st->work_on = false;
     st->output_safety_latch_armed = false;
     st->drying_running = false; st->drying_end_ms = 0;
@@ -89,7 +105,7 @@ void shu1_settings_stop(shu1_settings_t *st) {
     st->health_test_running = false; st->health_test_phase = SHU1_HEALTH_IDLE;
     st->scheduled_preheat_enabled = false; st->scheduled_preheat_start_ms = 0;
     st->keep_warm_active = false; st->keep_warm_end_ms = 0;
-    st->pickup_active = false; st->resume_recover_active = false;
+    st->pickup_active = false;
     st->tempering_phase = SHU1_TEMPERING_IDLE;
     st->tempering_start_ms = 0; st->tempering_end_ms = 0;
     st->heat_soak_phase = SHU1_HEAT_SOAK_IDLE;
@@ -148,9 +164,6 @@ void shu1_state_init(void) {
     g_state.settings.material_mismatch_user_profile = SHU1_PROFILE_CUSTOM;
     g_state.settings.material_mismatch_printer_profile = SHU1_PROFILE_CUSTOM;
     g_state.settings.material_mismatch_detected_ms = 0;
-    g_state.settings.anti_warp_enabled = false;
-    g_state.settings.large_print_protection_enabled = false;
-    g_state.settings.safe_overnight_enabled = false;
     g_state.settings.pause_hold_enabled = true;
     g_state.settings.pause_hold_strategy = SHU1_PAUSE_HOLD_KEEP;
     g_state.settings.pause_hold_min = 60;
@@ -212,10 +225,6 @@ void shu1_state_init(void) {
     g_state.settings.pla_protection_enabled = true;
     g_state.settings.pla_protection_confirmed = false;
     g_state.settings.pla_protection_pending = false;
-    g_state.settings.smart_resume_enabled = true;
-    g_state.settings.resume_recover_min = 5;
-    g_state.settings.resume_recover_active = false;
-    g_state.settings.resume_recover_end_ms = 0;
     g_state.settings.post_print_pickup_mode = SHU1_PICKUP_OFF;
     g_state.settings.pickup_keep_warm_min = 60;
     g_state.settings.pickup_active = false;
@@ -225,9 +234,6 @@ void shu1_state_init(void) {
     g_state.settings.print_risk_warning_pending = false;
     g_state.settings.start_print_warning_enabled = true;
     g_state.settings.start_print_warning_pending = false;
-    g_state.settings.local_recipes_enabled = true;
-    g_state.settings.active_recipe_slot = 0;
-    snprintf(g_state.settings.active_recipe_name, sizeof(g_state.settings.active_recipe_name), "%s", "Default");
     g_state.settings.safety_score_enabled = true;
     g_state.settings.safety_score = 0;
     g_state.settings.setup_validation_passed = false;
@@ -253,7 +259,6 @@ void shu1_state_init(void) {
     g_state.settings.ota_enabled = false;
     g_state.settings.ota_rollback_placeholder_enabled = false;
     g_state.settings.ota_status = SHU1_OTA_IDLE;
-    g_state.settings.contest_showcase_mode_enabled = false;
     g_state.settings.symbiont_mode_enabled = false;
     g_state.settings.symbiont_ventilation_allowed = false;
     g_state.settings.symbiont_safe_control_enabled = false;

@@ -81,7 +81,7 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SnapHeaterApp() {
+fun SnapHeaterApp(notificationDevice: String="", onNotificationHandled: () -> Unit = {}) {
     var visualPreview by rememberSaveable { mutableStateOf(false) }
     if (visualPreview) {
         com.alphastudio.snapheateru1.ui.screens.VisualPreviewScreen(onExit = { visualPreview = false })
@@ -109,6 +109,11 @@ fun SnapHeaterApp() {
     var advancedSettings by rememberSaveable { mutableStateOf(false) }
     var commandPending by remember { mutableStateOf(false) }
     var stopPending by remember { mutableStateOf(false) }
+    val responseFence = remember { com.alphastudio.snapheateru1.data.ResponseFence() }
+    var clearPending by remember { mutableStateOf(false) }
+    var clearMessage by remember { mutableStateOf("") }
+    LaunchedEffect(connectedBaseUrl) { clearMessage="" }
+    var freezeStopError by remember { mutableStateOf("") }
     var connectionHealthy by remember { mutableStateOf(false) }
     var printerWizard by rememberSaveable { mutableStateOf(true) }
     var printerSkipped by rememberSaveable { mutableStateOf(true) }
@@ -133,6 +138,33 @@ fun SnapHeaterApp() {
         else -> stringResource(R.string.modes_available)
     }
     val scope = rememberCoroutineScope()
+    val history = remember(deviceContext) { com.alphastudio.snapheateru1.data.TemperatureHistory(deviceContext) }
+    var historyError by remember { mutableStateOf(false) }
+    var historyCatchingUp by remember { mutableStateOf(false) }
+    val historySync=remember(history,deviceContext) { com.alphastudio.snapheateru1.data.HistorySync(deviceContext,history) }
+    var eventsError by remember { mutableStateOf(false) }
+    var monitorStatus by remember { mutableStateOf("") }
+    var usagePromptPending by remember { mutableStateOf(false) }
+    var usageMessage by remember { mutableStateOf("") }
+    androidx.compose.runtime.DisposableEffect(history) { onDispose { history.close() } }
+    LaunchedEffect(snapshot.deviceId, snapshot.usageAvailable, usagePromptPending) {
+        if (usagePromptPending && snapshot.usageAvailable && snapshot.deviceId.isNotBlank()) {
+            val today=java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.US).format(java.util.Date())
+            val key="usage_day_${snapshot.deviceId.uppercase()}"
+            if (preferences.getString(key,null)!=today) {
+                usageMessage=context.getString(R.string.usage_daily,
+                    snapshot.heaterUsageMs/3600000.0, snapshot.filterUsageMs/3600000.0)
+                preferences.edit().putString(key,today).apply()
+            }
+            usagePromptPending=false
+        }
+    }
+    if (usageMessage.isNotBlank()) androidx.compose.material3.AlertDialog(
+        onDismissRequest={usageMessage=""},
+        title={Text(stringResource(R.string.usage_title))},
+        text={Text(usageMessage)},
+        confirmButton={TextButton(onClick={usageMessage=""}){Text(stringResource(android.R.string.ok))}}
+    )
     var settingsDraft by remember(advancedSettings, connectedBaseUrl) { mutableStateOf(snapshot) }
     val bleScanner = remember(deviceContext) { SnapHeaterBleScanner(deviceContext) }
     val firmwareRepository = remember(deviceContext, connectedBaseUrl) {
@@ -157,6 +189,8 @@ fun SnapHeaterApp() {
     }
 
     fun rememberConnectedDevice(address: String, deviceId: String) {
+        com.alphastudio.snapheateru1.data.NotificationMonitorService.stop(deviceContext)
+        usagePromptPending=true
         val canonical = if (address.startsWith("ble://", ignoreCase = true))
             "ble://" + address.substringAfter("://").uppercase()
         else normalizeBaseUrl(address)
@@ -181,8 +215,11 @@ fun SnapHeaterApp() {
         printerSetupStatus = ""
     }
 
-    fun connectSavedDevice(address: String) {
+    fun connectSavedDevice(address: String, expectedId: String?=null) {
         if (isConnecting || isScanning) return
+        val ticket = responseFence.invalidate()
+        commandPending = false
+        stopPending = false
         deviceAddress = address
         isConnecting = true
         connectionHealthy = false
@@ -195,6 +232,12 @@ fun SnapHeaterApp() {
                     else restRepository(address).checkHealth()
                 }
             }.onSuccess { latest ->
+                if (!responseFence.accepts(ticket)) return@onSuccess
+                if(expectedId!=null && !latest.deviceId.equals(expectedId,true)) {
+                    connectionStatus=context.getString(R.string.status_connection_failed,"Device identity mismatch")
+                    isConnecting=false
+                    return@onSuccess
+                }
                 rememberConnectedDevice(address, latest.deviceId)
                 connectedBaseUrl = address
                 snapshot = latest
@@ -203,14 +246,38 @@ fun SnapHeaterApp() {
                 connectionStatus = context.getString(R.string.status_connected_to, address)
                 appSessionName = AppSession.Connected.name
             }.onFailure { error ->
+                if (!responseFence.accepts(ticket)) return@onFailure
                 connectionStatus = context.getString(R.string.status_connection_failed, error.shortMessage())
             }
-            isConnecting = false
+            if (responseFence.accepts(ticket)) isConnecting = false
         }
     }
 
-    fun requestSafeStop() {
+    LaunchedEffect(notificationDevice,commandPending,stopPending,isConnecting,isScanning) {
+        if(commandPending || stopPending || isConnecting || isScanning) return@LaunchedEffect
+        if(notificationDevice.isNotBlank()) {
+            selectedTabName=AppTab.History.name
+            if(appSession!=AppSession.Connected || !snapshot.deviceId.equals(notificationDevice,true)) {
+                appSessionName=AppSession.Connect.name
+                val address=savedDevices.firstOrNull {preferences.getString("device_id_$it",null).equals(notificationDevice,true)}
+                if(address!=null) connectSavedDevice(address,notificationDevice)
+            }
+            onNotificationHandled()
+        }
+    }
+
+    fun recordFreezeAction(device: String, code: String) {
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) {
+                com.alphastudio.snapheateru1.data.EventHistory(deviceContext).use { it.action(device,code) }
+            } }.onFailure { eventsError=true }
+        }
+    }
+    fun requestSafeStop(freezeAction: Boolean=false) {
         if (stopPending) return
+        val ticket = responseFence.invalidate()
+        commandPending = false
+        val actionDevice=snapshot.deviceId
         val pendingStop = snapshot.copy(
             mode = AppMode.SafeStop,
             lastConfirmedSettings = context.getString(R.string.common_pending),
@@ -218,17 +285,24 @@ fun SnapHeaterApp() {
         connectionStatus = context.getString(R.string.heating_stopping)
         val repository = firmwareRepository
         if (repository != null) {
+            if(freezeAction) freezeStopError=""
+            if(freezeAction) recordFreezeAction(actionDevice,"phone_freeze_stop_requested")
             stopPending = true
             scope.launch {
                 runCatching {
                     withContext(Dispatchers.IO) { repository.applySettings(pendingStop) }
                 }.onSuccess { latest ->
+                    if (!responseFence.accepts(ticket)) return@onSuccess
+                    if(freezeAction) recordFreezeAction(actionDevice,if(latest.mode==AppMode.SafeStop) "phone_freeze_stop_confirmed" else "phone_freeze_stop_failed")
                     snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.mode_safe_stop))
                     connectionStatus = context.getString(R.string.status_settings_confirmed)
                 }.onFailure { error ->
+                    if (!responseFence.accepts(ticket)) return@onFailure
+                    if(freezeAction) recordFreezeAction(actionDevice,"phone_freeze_stop_failed")
+                    if(freezeAction) freezeStopError=context.getString(R.string.freeze_event_stop_failed)
                     connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
                 }
-                stopPending = false
+                if (responseFence.accepts(ticket)) stopPending = false
             }
         }
     }
@@ -281,6 +355,29 @@ fun SnapHeaterApp() {
         }
     }
     val alertId = snapshot.virtualDoorDetectedMs
+    var freezeAcknowledged by remember(snapshot.deviceId,snapshot.sensorFreezeWarningMs) { mutableStateOf(false) }
+    LaunchedEffect(snapshot.deviceId,snapshot.sensorFreezeWarningMs) {freezeStopError=""}
+    if (appSession==AppSession.Connected && snapshot.sensorFreezeWarningMs>0 && !freezeAcknowledged) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { /* An unanswered alert does not change the Panda deadline. */ },
+            title = { Text(stringResource(R.string.freeze_title)) },
+            text = { Column {
+                Text(if(connectionHealthy)
+                    stringResource(R.string.freeze_message,"SH_${snapshot.deviceId.takeLast(4)}",snapshot.sensorFreezeRemainingS)
+                    else stringResource(R.string.freeze_disconnected))
+                if(stopPending) Text(stringResource(R.string.heating_stopping))
+                if(freezeStopError.isNotBlank()) Text(freezeStopError,color=MaterialTheme.colorScheme.error)
+            } },
+            confirmButton = { TextButton(enabled=!stopPending, onClick={requestSafeStop(true)}) {
+                ActionLabel(Icons.Outlined.StopCircle,stringResource(R.string.freeze_stop))
+            } },
+            dismissButton = { TextButton(onClick={
+                freezeAcknowledged=true
+                recordFreezeAction(snapshot.deviceId,"phone_freeze_continue")
+                // A local receipt only. No control command, lease or deadline changes.
+            }) { ActionLabel(Icons.Outlined.TaskAlt,stringResource(R.string.freeze_continue)) } }
+        )
+    }
     val alertDevice = snapshot.deviceId.ifBlank { connectedBaseUrl }
     val alertMessage = stringResource(R.string.vdoor_message, savedDeviceNames[connectedBaseUrl] ?: "SH_${snapshot.deviceId.takeLast(4)}", snapshot.virtualDoorDropC)
     var postedAlert by remember(connectedBaseUrl) { mutableStateOf(0L) }
@@ -298,12 +395,13 @@ fun SnapHeaterApp() {
             text = { Text(alertMessage) },
             confirmButton = { TextButton(enabled = connectionHealthy && !commandPending && !stopPending, onClick = {
                 val repository = firmwareRepository ?: return@TextButton
+                val ticket = responseFence.invalidate()
                 commandPending = true
                 scope.launch {
                     runCatching { withContext(Dispatchers.IO) { repository.acknowledgeVirtualDoor(alertId) } }
-                        .onSuccess { if (snapshot.virtualDoorDetectedMs == alertId) snapshot = snapshot.copy(virtualDoorPending = false) }
-                        .onFailure { connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
-                    commandPending = false
+                        .onSuccess { if (responseFence.accepts(ticket) && snapshot.virtualDoorDetectedMs == alertId) snapshot = snapshot.copy(virtualDoorPending = false) }
+                        .onFailure { if (responseFence.accepts(ticket)) connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                    if (responseFence.accepts(ticket)) commandPending = false
                 }
             }) { Text(stringResource(R.string.vdoor_ack)) } },
         )
@@ -312,18 +410,45 @@ fun SnapHeaterApp() {
     LaunchedEffect(appSessionName, connectedBaseUrl) {
         val repository = firmwareRepository ?: return@LaunchedEffect
         if (appSession != AppSession.Connected) return@LaunchedEffect
+        var eventsAt=0L
         while (true) {
+            if (!com.alphastudio.snapheateru1.data.NotificationMonitorService.uiVisible) {delay(1000);continue}
             if (commandPending || stopPending) { delay(300); continue }
+            val ticket = responseFence.ticket()
             runCatching {
                 withContext(Dispatchers.IO) { repository.snapshot() }
             }.onSuccess { latest ->
+                if (!responseFence.accepts(ticket) || commandPending || stopPending) return@onSuccess
                 connectionHealthy = true
                 snapshot = latest.copy(lastConfirmedSettings = snapshot.lastConfirmedSettings)
                 connectionStatus = context.getString(R.string.status_connected_to, connectedBaseUrl)
             }.onFailure { error ->
+                if (!responseFence.accepts(ticket) || commandPending || stopPending) return@onFailure
                 connectionHealthy = false
                 connectionStatus = context.getString(R.string.status_connection_lost, error.shortMessage())
                 snapshot = snapshot.copy(ble = "LAN error")
+            }
+            if (connectionHealthy && !commandPending && !stopPending) {
+                val measurement=snapshot
+                try {
+                    historyCatchingUp=withContext(Dispatchers.IO) { historySync.step(connectedBaseUrl,measurement.deviceId) }
+                    historyError=false
+                } catch(cancelled: kotlinx.coroutines.CancellationException) {throw cancelled}
+                catch(_: Exception) {
+                    historyError=true
+                    historyCatchingUp=false
+                    // Older firmware remains usable. Once Panda history is known,
+                    // no second live stream is created while its transport is down.
+                    runCatching {withContext(Dispatchers.IO) {history.record(measurement)}}
+                }
+                if (android.os.SystemClock.elapsedRealtime()-eventsAt>=15000 &&
+                    com.alphastudio.snapheateru1.data.NotificationMonitorService.uiVisible && !commandPending && !stopPending) {
+                    eventsAt=android.os.SystemClock.elapsedRealtime()
+                    eventsError=runCatching { withContext(Dispatchers.IO) {
+                        val page=com.alphastudio.snapheateru1.data.DeviceEvents.fetch(deviceContext,connectedBaseUrl)
+                        com.alphastudio.snapheateru1.data.DeviceEvents.receive(deviceContext,measurement.deviceId,page)
+                    } }.isFailure
+                }
             }
             delay(3000)
         }
@@ -357,6 +482,7 @@ fun SnapHeaterApp() {
                     scanMessage = context.getString(R.string.status_ready)
                 },
                 onConnect = {
+                    val ticket = responseFence.invalidate()
                     val baseUrl = normalizeBaseUrl(deviceAddress)
                     isConnecting = true
                     connectionStatus = context.getString(R.string.status_connecting)
@@ -370,6 +496,7 @@ fun SnapHeaterApp() {
                                 verified
                             }
                         }.onSuccess { latest ->
+                            if (!responseFence.accepts(ticket)) return@onSuccess
                             connectedBaseUrl = baseUrl
                             restToken = ""
                             rememberConnectedDevice(baseUrl, latest.deviceId)
@@ -379,12 +506,14 @@ fun SnapHeaterApp() {
                             connectionStatus = context.getString(R.string.status_connected_to, baseUrl)
                             appSessionName = AppSession.Connected.name
                         }.onFailure { error ->
+                            if (!responseFence.accepts(ticket)) return@onFailure
                             connectionStatus = context.getString(R.string.status_connection_failed, error.shortMessage())
                         }
-                        isConnecting = false
+                        if (responseFence.accepts(ticket)) isConnecting = false
                     }
                 },
                 onBleConnect = {
+                    val ticket = responseFence.invalidate()
                     val bleAddress = deviceAddress.removePrefix("ble://")
                     isConnecting = true
                     connectionStatus = context.getString(R.string.status_connecting)
@@ -394,6 +523,7 @@ fun SnapHeaterApp() {
                                 BleSnapHeaterRepository(context.applicationContext, bleAddress).snapshot()
                             }
                         }.onSuccess { latest ->
+                            if (!responseFence.accepts(ticket)) return@onSuccess
                             connectedBaseUrl = "ble://$bleAddress"
                             rememberConnectedDevice("ble://$bleAddress", latest.deviceId)
                             preferences.edit().putString("ble_device_address", bleAddress).apply()
@@ -402,9 +532,10 @@ fun SnapHeaterApp() {
                             connectionStatus = context.getString(R.string.status_connected_to, "BLE $bleAddress")
                             appSessionName = AppSession.Connected.name
                         }.onFailure { error ->
+                            if (!responseFence.accepts(ticket)) return@onFailure
                             connectionStatus = context.getString(R.string.status_connection_failed, error.shortMessage())
                         }
-                        isConnecting = false
+                        if (responseFence.accepts(ticket)) isConnecting = false
                     }
                 },
                 onBleSearch = {
@@ -434,15 +565,16 @@ fun SnapHeaterApp() {
                     if (repository != null && connectedBaseUrl.startsWith("ble://") &&
                         connectionHealthy && !commandPending && !stopPending && !snapshot.wifi.busy &&
                         snapshot.mode == AppMode.SafeStop && !snapshot.fanOn) {
+                        val ticket = responseFence.invalidate()
                         commandPending = true
                         wifiSetupError = ""
                         scope.launch {
                             runCatching {
                                 withContext(Dispatchers.IO) { repository.setupWifi(action, ssid, password) }
-                            }.onSuccess { snapshot = it }.onFailure {
-                                wifiSetupError = context.getString(R.string.wifi_request_failed)
+                            }.onSuccess { if (responseFence.accepts(ticket)) snapshot = it }.onFailure {
+                                if (responseFence.accepts(ticket)) wifiSetupError = context.getString(R.string.wifi_request_failed)
                             }
-                            commandPending = false
+                            if (responseFence.accepts(ticket)) commandPending = false
                         }
                     }
                 },
@@ -452,6 +584,9 @@ fun SnapHeaterApp() {
                 },
                 onSkip = { printerSkipped = true; printerWizard = false },
                 onReconnect = {
+                    responseFence.invalidate()
+                    commandPending = false
+                    stopPending = false
                     appSessionName = AppSession.Connect.name
                     connectedBaseUrl = ""
                     connectionHealthy = false
@@ -469,15 +604,19 @@ fun SnapHeaterApp() {
             idle = connectionHealthy && snapshot.mode == AppMode.SafeStop && !snapshot.fanOn,
             saved = printerConfigSaved,
             status = printerSetupStatus,
-            onSave = { host, port, ssid, password ->
+            onSave = { host, port, apiKey ->
                 val repository = firmwareRepository
                 if (repository != null && !commandPending && !stopPending &&
                     connectionHealthy && snapshot.mode == AppMode.SafeStop && !snapshot.fanOn) {
+                    val ticket = responseFence.invalidate()
                     commandPending = true
+                    printerConfigSaved = false
+                    printerSetupStatus = context.getString(R.string.printer_setup_testing)
                     scope.launch {
                         runCatching {
-                            withContext(Dispatchers.IO) { repository.configurePrinter(host, port, ssid, password) }
+                            withContext(Dispatchers.IO) { repository.configurePrinter(host, port, apiKey) }
                         }.onSuccess {
+                            if (!responseFence.accepts(ticket)) return@onSuccess
                             snapshot = it
                             printerConfigSaved = true
                             preferences.edit()
@@ -485,16 +624,24 @@ fun SnapHeaterApp() {
                                 .putInt("printer_port_${snapshot.deviceId.ifBlank { connectedBaseUrl }}", port)
                                 .apply()
                             printerSkipped = true
-                            printerSetupStatus = context.getString(R.string.wizard_restart)
+                            printerSetupStatus = context.getString(R.string.printer_setup_success)
                         }.onFailure {
-                            printerSetupStatus = context.getString(R.string.wizard_save_failed)
+                            if (!responseFence.accepts(ticket)) return@onFailure
+                            val reason=(it as? com.alphastudio.snapheateru1.data.PrinterSetupException)?.reason
+                            printerSetupStatus = context.getString(when(reason) {
+                                "auth_failed" -> R.string.printer_setup_auth
+                                "printer_not_ready","missing_data" -> R.string.printer_setup_data
+                                "unreachable","websocket_failed" -> R.string.printer_setup_network
+                                "storage_failed","client_stop_failed" -> R.string.printer_setup_storage
+                                else -> R.string.printer_setup_uncertain
+                            })
                         }
-                        commandPending = false
+                        if (responseFence.accepts(ticket)) commandPending = false
                     }
                 }
             },
             onContinue = {
-                if (connectionHealthy && snapshot.printerDataReady && !printerConfigSaved) {
+                if (connectionHealthy && snapshot.printerDataReady) {
                     printerSkipped = false
                     printerWizard = false
                 }
@@ -511,6 +658,12 @@ fun SnapHeaterApp() {
     }
 
     SnapHeaterScaffold(
+        persistenceStatus = context.getString(when {
+            !connectionHealthy || !snapshot.settingsPersistenceKnown -> R.string.persistence_unknown
+            !snapshot.settingsPersistOk -> R.string.persistence_failed
+            snapshot.settingsPending -> R.string.persistence_pending
+            else -> R.string.persistence_saved
+        }),
         selectedTab = selectedTab,
         snapshot = snapshot,
         modeLabel = modeLabel,
@@ -521,6 +674,10 @@ fun SnapHeaterApp() {
             if (it == AppTab.Settings) advancedSettings = false
         },
         onReconnect = {
+            responseFence.invalidate()
+            commandPending = false
+            stopPending = false
+            com.alphastudio.snapheateru1.data.NotificationMonitorService.stop(deviceContext)
             printerWizard = true
             printerSkipped = true
             printerConfigSaved = false
@@ -533,6 +690,48 @@ fun SnapHeaterApp() {
     ) { tab ->
         when (tab) {
             AppTab.Dashboard -> DashboardScreen(
+                clearPending=clearPending,
+                clearEnabled=connectionHealthy && !commandPending && !stopPending,
+                clearMessage=clearMessage,
+                onClearFault={
+                    val repository=firmwareRepository
+                    if(repository!=null && connectionHealthy && !commandPending && !stopPending) {
+                        val clearingAddress=connectedBaseUrl
+                        val ticket = responseFence.invalidate()
+                        commandPending=true;clearPending=true;clearMessage=""
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { repository.clearFault() } }
+                                .onSuccess {
+                                    if(responseFence.accepts(ticket) && clearingAddress==connectedBaseUrl) {
+                                        if(!stopPending) snapshot=it
+                                        clearMessage=context.getString(R.string.fault_clear_success)
+                                    }
+                                }
+                                .onFailure {
+                                    if(responseFence.accepts(ticket) && clearingAddress==connectedBaseUrl)
+                                        clearMessage=context.getString(R.string.fault_clear_failed)
+                                }
+                            clearPending=false
+                            if (responseFence.accepts(ticket)) commandPending=false
+                        }
+                    }
+                },
+                pauseEnabled = connectionHealthy && !commandPending && !stopPending,
+                onPause = {
+                    val repository = firmwareRepository
+                    if (repository != null && connectionHealthy && !commandPending && !stopPending) {
+                        val pause = !snapshot.paused
+                        val expectedRevision = snapshot.controlStateRevision
+                        val ticket = responseFence.invalidate()
+                        commandPending = true
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { repository.pauseJob(pause, expectedRevision) } }
+                                .onSuccess { if (responseFence.accepts(ticket)) snapshot = it }
+                                .onFailure { if (responseFence.accepts(ticket)) connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                            if (responseFence.accepts(ticket)) commandPending = false
+                        }
+                    }
+                },
                 stopPending = stopPending,
                 snapshot = snapshot,
                 telemetryFresh = connectionHealthy,
@@ -557,7 +756,9 @@ fun SnapHeaterApp() {
                     }
                 },
                 onConfirmSettings = { confirmed ->
+                    if (!connectionHealthy || commandPending || stopPending) return@ModesScreen
                     if (confirmed.mode.requiresPrinter() && !printerAllowed) return@ModesScreen
+                    val ticket = responseFence.invalidate()
                     commandPending = true
                     connectionStatus = context.getString(R.string.common_pending)
                     val repository = firmwareRepository
@@ -566,12 +767,14 @@ fun SnapHeaterApp() {
                             runCatching {
                                 withContext(Dispatchers.IO) { repository.applySettings(confirmed) }
                             }.onSuccess { latest ->
+                                if (!responseFence.accepts(ticket)) return@onSuccess
                                 snapshot = latest.copy(lastConfirmedSettings = confirmed.lastConfirmedSettings)
                                 connectionStatus = context.getString(R.string.status_settings_confirmed)
                             }.onFailure { error ->
+                                if (!responseFence.accepts(ticket)) return@onFailure
                                 connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
                             }
-                            commandPending = false
+                            if (responseFence.accepts(ticket)) commandPending = false
                         }
                     } else {
                         commandPending = false
@@ -581,6 +784,9 @@ fun SnapHeaterApp() {
             AppTab.Safety -> SafetyScreen(
                 snapshot = snapshot,
                 onApplySafety = { updated, armLatch, disarmLatch ->
+                    if (!connectionHealthy || commandPending || stopPending) return@SafetyScreen
+                    val ticket = responseFence.invalidate()
+                    commandPending = true
                     snapshot = updated.copy(lastConfirmedSettings = "Applying safety state")
                     val repository = firmwareRepository
                     if (repository != null) {
@@ -588,23 +794,49 @@ fun SnapHeaterApp() {
                             runCatching {
                                 withContext(Dispatchers.IO) { repository.applySafety(updated, armLatch, disarmLatch) }
                             }.onSuccess { latest ->
+                                if (!responseFence.accepts(ticket)) return@onSuccess
                                 snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.status_safety_applied))
                                 connectionStatus = context.getString(R.string.status_safety_applied)
                             }.onFailure { error ->
+                                if (!responseFence.accepts(ticket)) return@onFailure
                                 connectionStatus = context.getString(R.string.status_safety_failed, error.shortMessage())
                                 snapshot = updated.copy(lastConfirmedSettings = context.getString(R.string.status_safety_pending))
                             }
+                            if (responseFence.accepts(ticket)) commandPending = false
                         }
                     } else {
                         appSessionName = AppSession.Connect.name
                     }
                 },
             )
+            AppTab.History -> {
+                com.alphastudio.snapheateru1.ui.screens.HistoryScreen(history, snapshot, historyError, connectionHealthy, historyCatchingUp)
+            }
             AppTab.Diagnostics -> DiagnosticsScreen(snapshot)
             AppTab.Settings -> if (!advancedSettings) {
                 ScreenColumn {
                     Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium)
                     Text(stringResource(R.string.daily_settings_intro))
+                    Text(stringResource(R.string.monitor_note))
+                    if(eventsError) Text(stringResource(R.string.monitor_disconnected))
+                    Button(enabled=connectionHealthy && !commandPending && !stopPending, onClick={
+                        if(androidx.core.app.NotificationManagerCompat.from(deviceContext).areNotificationsEnabled()) {
+                            runCatching {
+                                ContextCompat.startForegroundService(deviceContext,android.content.Intent(deviceContext,
+                                    com.alphastudio.snapheateru1.data.NotificationMonitorService::class.java)
+                                    .putExtra("address",connectedBaseUrl).putExtra("device",snapshot.deviceId))
+                            }.onSuccess {monitorStatus=context.getString(R.string.monitor_active)}
+                                .onFailure {monitorStatus=context.getString(R.string.monitor_disconnected)}
+                        } else monitorStatus=context.getString(R.string.monitor_permission)
+                    }) {ActionLabel(Icons.Outlined.NotificationsActive,stringResource(R.string.monitor_start))}
+                    TextButton(onClick={
+                        com.alphastudio.snapheateru1.data.NotificationMonitorService.stop(deviceContext)
+                        monitorStatus=context.getString(R.string.monitor_stopped)
+                    }) {ActionLabel(Icons.Outlined.NotificationsOff,stringResource(R.string.monitor_stop))}
+                    if(monitorStatus.isNotBlank()) Text(monitorStatus)
+                    com.alphastudio.snapheateru1.ui.screens.OtaCard(
+                        connectedBaseUrl, snapshot, connectionHealthy, commandPending || stopPending,
+                        onBusy={ if (it) responseFence.invalidate(); commandPending=it })
                     LanguagePicker()
                     Button(onClick = { selectedTabName = AppTab.Safety.name }) {
                         ActionLabel(Icons.Outlined.Shield, stringResource(R.string.snapheater_safety))
@@ -626,20 +858,23 @@ fun SnapHeaterApp() {
                 onVirtualDoorDetectionChange = { enabled ->
                     val repository = firmwareRepository
                     if (repository != null && connectionHealthy && !commandPending && !stopPending) {
+                        val ticket = responseFence.invalidate()
                         commandPending = true
                         scope.launch {
                             runCatching { withContext(Dispatchers.IO) { repository.setVirtualDoorDetection(enabled) } }
                                 .onSuccess {
+                                    if (!responseFence.accepts(ticket)) return@onSuccess
                                     snapshot = snapshot.copy(virtualDoorDetectionEnabled = it.virtualDoorDetectionEnabled)
                                     settingsDraft = settingsDraft.copy(virtualDoorDetectionEnabled = it.virtualDoorDetectionEnabled)
                                 }
-                                .onFailure { connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
-                            commandPending = false
+                                .onFailure { if (responseFence.accepts(ticket)) connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                            if (responseFence.accepts(ticket)) commandPending = false
                         }
                     }
                 },
                 onApplySettings = { updated ->
                     if (!connectionHealthy || commandPending || stopPending) return@SettingsScreen
+                    val ticket = responseFence.invalidate()
                     commandPending = true
                     val repository = firmwareRepository
                     if (repository != null) {
@@ -647,13 +882,15 @@ fun SnapHeaterApp() {
                             runCatching {
                                 withContext(Dispatchers.IO) { repository.savePreferences(updated) }
                             }.onSuccess { latest ->
-                                if (!stopPending) snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.status_settings_applied))
+                                if (!responseFence.accepts(ticket)) return@onSuccess
+                                snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.status_settings_applied))
                                 settingsDraft = latest
                                 connectionStatus = context.getString(R.string.status_settings_applied)
                             }.onFailure { error ->
+                                if (!responseFence.accepts(ticket)) return@onFailure
                                 connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
                             }
-                            commandPending = false
+                            if (responseFence.accepts(ticket)) commandPending = false
                         }
                     } else {
                         commandPending = false
@@ -664,12 +901,13 @@ fun SnapHeaterApp() {
                     val repository = firmwareRepository
                     if (repository != null && connectionHealthy && !commandPending && !stopPending &&
                         (snapshot.mode == AppMode.SafeStop || !planned.scheduledPreheatEnabled)) {
+                        val ticket = responseFence.invalidate()
                         commandPending = true
                         scope.launch {
                             runCatching { withContext(Dispatchers.IO) { repository.schedulePreheat(planned) } }
-                                .onSuccess { latest -> if (!stopPending) snapshot = latest; settingsDraft = latest }
-                                .onFailure { connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
-                            commandPending = false
+                                .onSuccess { latest -> if (responseFence.accepts(ticket)) { snapshot = latest; settingsDraft = latest } }
+                                .onFailure { if (responseFence.accepts(ticket)) connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                            if (responseFence.accepts(ticket)) commandPending = false
                         }
                     } else connectionStatus = context.getString(R.string.schedule_stop_first)
                 },
@@ -679,6 +917,7 @@ fun SnapHeaterApp() {
                     val repository = firmwareRepository
                     val ip = snapshot.wifi.ip
                     if (repository != null && !commandPending && !stopPending && ip.isNotBlank()) {
+                        val ticket = responseFence.invalidate()
                         commandPending = true
                         scope.launch {
                             runCatching {
@@ -687,9 +926,9 @@ fun SnapHeaterApp() {
                                     credentials.save(normalizeBaseUrl(ip), token)
                                     restRepository(normalizeBaseUrl(ip)).checkHealth()
                                 }
-                            }.onSuccess { connectionStatus = context.getString(R.string.rest_verified) }
-                                .onFailure { connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
-                            commandPending = false
+                            }.onSuccess { if (responseFence.accepts(ticket)) connectionStatus = context.getString(R.string.rest_verified) }
+                                .onFailure { if (responseFence.accepts(ticket)) connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                            if (responseFence.accepts(ticket)) commandPending = false
                         }
                     }
                 },
@@ -703,6 +942,7 @@ private fun Throwable.shortMessage(): String = message?.take(80) ?: this::class.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SnapHeaterScaffold(
+    persistenceStatus: String,
     selectedTab: AppTab,
     snapshot: HeaterSnapshot,
     modeLabel: String,
@@ -745,7 +985,7 @@ private fun SnapHeaterScaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 tonalElevation = 0.dp,
             ) {
-                listOf(AppTab.Dashboard, AppTab.Modes, AppTab.Settings).forEach { tab ->
+                listOf(AppTab.Dashboard, AppTab.Modes, AppTab.History, AppTab.Settings).forEach { tab ->
                     NavigationBarItem(
                         selected = selectedTab == tab || (tab == AppTab.Settings &&
                             selectedTab in listOf(AppTab.Safety, AppTab.Diagnostics)),
@@ -765,8 +1005,10 @@ private fun SnapHeaterScaffold(
         },
     ) { padding ->
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-                content(selectedTab)
+            Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                Text(persistenceStatus, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall)
+                Box(modifier = Modifier.weight(1f)) { content(selectedTab) }
             }
         }
     }
@@ -806,20 +1048,20 @@ private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
             snapshot.autoMaterialProfileEnabled,
             snapshot.mismatchWarningEnabled,
             snapshot.plaProtectionEnabled,
-            snapshot.antiWarpEnabled,
-            snapshot.largePrintProtectionEnabled,
-            snapshot.safeOvernightEnabled,
+            false, // Reserved slot for a removed feature.
+            false, // Reserved slot for a removed feature.
+            false, // Reserved slot for a removed feature.
             snapshot.pauseHoldEnabled,
-            snapshot.smartResumeEnabled,
+            false, // Reserved legacy saver slot; preserve subsequent field indexes.
             snapshot.startPrintWarningEnabled,
             snapshot.airflowDetectionEnabled,
             snapshot.tempHistoryEnabled,
             snapshot.incidentReportEnabled,
-            snapshot.localRecipesEnabled,
+            false, // Reserved slot for a removed feature.
             snapshot.scheduledPreheatEnabled,
             snapshot.localOnlyMode,
             false, // Reserved saved-state slot; retired firmware simulation.
-            snapshot.showcaseModeEnabled,
+            false, // Reserved slot for a removed feature.
             snapshot.symbiontModeEnabled,
             snapshot.symbiontVentilationAllowed,
             snapshot.heaterOutputBuildEnabled,
@@ -878,19 +1120,13 @@ private val HeaterSnapshotSaver = listSaver<HeaterSnapshot, Any>(
             autoMaterialProfileEnabled = values[20] as Boolean,
             mismatchWarningEnabled = values[21] as Boolean,
             plaProtectionEnabled = values[22] as Boolean,
-            antiWarpEnabled = values[23] as Boolean,
-            largePrintProtectionEnabled = values[24] as Boolean,
-            safeOvernightEnabled = values[25] as Boolean,
             pauseHoldEnabled = values[26] as Boolean,
-            smartResumeEnabled = values[27] as Boolean,
             startPrintWarningEnabled = values[28] as Boolean,
             airflowDetectionEnabled = values[29] as Boolean,
             tempHistoryEnabled = values[30] as Boolean,
             incidentReportEnabled = values[31] as Boolean,
-            localRecipesEnabled = values[32] as Boolean,
             scheduledPreheatEnabled = values[33] as Boolean,
             localOnlyMode = values[34] as Boolean,
-            showcaseModeEnabled = values[36] as Boolean,
             symbiontModeEnabled = values[37] as Boolean,
             symbiontVentilationAllowed = values[38] as Boolean,
             hardwareMapName = values.getOrNull(40) as? String ?: "panda_breath_accepted",

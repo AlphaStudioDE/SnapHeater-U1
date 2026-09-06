@@ -10,7 +10,7 @@ config SHU1_WIFI_PASSWORD
 
 config SHU1_MOONRAKER_HOST
     string "Snapmaker U1 / Moonraker host or IP"
-    default "192.168.1.100"
+    default ""
 
 config SHU1_MOONRAKER_PORT
     int "Moonraker port"

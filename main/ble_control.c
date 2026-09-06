@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: MIT
  */
 
+#define LOG_LOCAL_LEVEL ESP_LOG_NONE
 #include "ble_control.h"
+#include "recorder.h"
 #include "app_config.h"
 #include "app_state.h"
 #include "profiles.h"
 #include "settings_store.h"
+#include "settings_deferred.h"
 #include "command_validation.h"
+#include "json_guard.h"
 #include "job_commands.h"
 #include "event_log.h"
 #include "heater.h"
@@ -20,6 +24,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "wifi_sta.h"
+#include "moonraker_client.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -50,6 +55,9 @@ static const ble_uuid128_t g_control_uuid = BLE_UUID128_INIT(0x31,0x55,0x48,0x53
 static const ble_uuid128_t g_diag_uuid    = BLE_UUID128_INIT(0x31,0x55,0x48,0x53,0x4F,0x2F,0x1E,0x9A,0x2D,0x4C,0x6F,0x4A,0x03,0x10,0x2F,0x7B);
 
 static uint8_t g_own_addr_type;
+static char *g_history_payload;
+static const ble_uuid128_t g_history_uuid = BLE_UUID128_INIT(0x31,0x55,0x48,0x53,0x4F,0x2F,0x1E,0x9A,0x2D,0x4C,0x6F,0x4A,0x04,0x10,0x2F,0x7B);
+static const ble_uuid128_t g_events_uuid = BLE_UUID128_INIT(0x31,0x55,0x48,0x53,0x4F,0x2F,0x1E,0x9A,0x2D,0x4C,0x6F,0x4A,0x05,0x10,0x2F,0x7B);
 static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t g_status_val_handle;
 static bool g_ble_unlocked = false;
@@ -79,7 +87,7 @@ static bool json_bool(cJSON *root, const char *name, bool current) {
 
 static bool has_control_fields(cJSON *root) {
     const char *names[] = {
-        "safe_stop", "emergency_stop", "clear_heater_fault", "tempering_start_now",
+        "safe_stop", "emergency_stop", "clear_heater_fault", "tempering_start_now", "pause_job",
         "warehouse_temp_offset", "ptc_temp_offset",
         "work_on", "work_mode", "set_temp", "filtertemp", "hotbedtemp", "ptc_cutoff",
         "filament_drying_mode", "isrunning", "custom_temp", "custom_timer",
@@ -87,7 +95,6 @@ static bool has_control_fields(cJSON *root) {
         "material_profile", "profile", "manual_session_max_min", "ack_session_timeout",
         "fan_postrun_min", "cool_release", "tempering_enabled", "tempering_end_temp", "tempering_duration_min", "ack_tempering_complete", "cancel_tempering",
         "auto_material_profile_enabled", "material_mismatch_warning_enabled", "ack_material_mismatch", "clear_material_mismatch",
-        "anti_warp_enabled", "large_print_protection_enabled", "safe_overnight_enabled",
         "pause_hold_enabled", "pause_hold_strategy", "pause_hold_min", "pause_lower_after_min", "pause_lower_by_c", "pause_stop_after_min",
         "dryout_running", "dryout_target", "dryout_duration_min", "ack_dryout_complete",
         "scheduled_preheat_enabled", "scheduled_preheat_delay_min", "scheduled_preheat_target", "scheduled_preheat_hold_min", "ack_scheduled_preheat_started",
@@ -100,15 +107,15 @@ static bool has_control_fields(cJSON *root) {
         "filter_life_counter_enabled", "filter_life_limit_h", "ack_filter_life_warning",
         "heater_wear_tracking_enabled", "heater_wear_warning_pct", "ack_heater_wear_warning",
         "airflow_detection_enabled", "ack_airflow_warning", "pla_protection_enabled", "pla_protection_confirmed", "ack_pla_protection",
-        "smart_resume_enabled", "resume_recover_min", "post_print_pickup_mode", "pickup_keep_warm_min",
+        "post_print_pickup_mode", "pickup_keep_warm_min",
         "print_risk_enabled", "ack_print_risk_warning", "start_print_warning_enabled", "ack_start_print_warning",
-        "local_recipes_enabled", "active_recipe_slot", "active_recipe_name", "safety_score_enabled", "ack_setup_warning",
+        "safety_score_enabled", "ack_setup_warning",
         "first_setup_wizard_enabled", "first_setup_step", "first_setup_complete", "temp_history_enabled", "history_sample_period_sec",
         "incident_report_enabled", "generate_incident_report", "ack_incident_report", "output_safety_latch_enabled", "heater_output_verified",
         "fan_output_verified", "sensors_verified", "moonraker_verified", "arm_output_safety_latch", "disarm_output_safety_latch",
-        "notification_min_level", "language_code", "local_only_mode", "ota_enabled", "contest_showcase_mode_enabled",
+        "notification_min_level", "language_code", "local_only_mode", "ota_enabled",
         "symbiont_mode_enabled", "symbiont_ventilation_allowed", "symbiont_safe_control_enabled", "symbiont_policy", "ack_symbiont_notification",
-        "wifi_ssid", "wifi_password", "moonraker_host", "moonraker_port", "factory_reset", "wifi_setup",
+        "wifi_ssid", "wifi_password", "moonraker_host", "moonraker_port", "moonraker_api_key", "printer_setup", "factory_reset", "wifi_setup",
         "heartbeat", "lease_id", "expected_revision", "takeover"
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
@@ -119,7 +126,7 @@ static bool has_control_fields(cJSON *root) {
 
 static bool has_energy_control_field(cJSON *root) {
     static const char *const names[] = {
-        "work_on", "work_mode", "set_temp", "safe_stop", "emergency_stop",
+        "work_on", "work_mode", "set_temp", "safe_stop", "emergency_stop", "pause_job",
         "isrunning", "preheat_running", "dryout_running", "health_test_running",
         "scheduled_preheat_enabled", "keep_warm_active", "pickup_active",
         "tempering_enabled", "clear_heater_fault"
@@ -158,6 +165,8 @@ static const char *requested_lease(cJSON *root) {
 }
 
 static void apply_safe_stop(shu1_settings_t *st) {
+    st->user_paused = false;
+    st->user_pause_started_ms = 0;
     st->work_on = false;
     st->drying_running = false;
     st->drying_end_ms = 0;
@@ -186,7 +195,6 @@ static void apply_safe_stop(shu1_settings_t *st) {
     st->keep_warm_end_ms = 0;
     st->pickup_active = false;
     st->pickup_pending = false;
-    st->resume_recover_active = false;
     st->session_started_ms = 0;
     st->output_safety_latch_armed = false;
     st->work_mode = SHU1_MODE_AUTO;
@@ -201,12 +209,13 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
     shu1_state_get(stp);
 #define st (*stp)
     int64_t now_ms = esp_timer_get_time() / 1000;
-    int64_t drying_remaining_s = (st.settings.drying_end_ms > now_ms) ? (st.settings.drying_end_ms - now_ms) / 1000 : 0;
-    int64_t preheat_remaining_s = (st.settings.preheat_end_ms > now_ms) ? (st.settings.preheat_end_ms - now_ms) / 1000 : 0;
-    int64_t tempering_remaining_s = (st.settings.tempering_end_ms > now_ms) ? (st.settings.tempering_end_ms - now_ms) / 1000 : 0;
+    const int64_t job_now_ms=st.settings.user_paused ? st.settings.user_pause_started_ms : now_ms;
+    int64_t drying_remaining_s = (st.settings.drying_end_ms > job_now_ms) ? (st.settings.drying_end_ms - job_now_ms) / 1000 : 0;
+    int64_t preheat_remaining_s = (st.settings.preheat_end_ms > job_now_ms) ? (st.settings.preheat_end_ms - job_now_ms) / 1000 : 0;
+    int64_t tempering_remaining_s = (st.settings.tempering_end_ms > job_now_ms) ? (st.settings.tempering_end_ms - job_now_ms) / 1000 : 0;
     int tempering_progress_pct = 0;
     if (st.settings.tempering_phase == SHU1_TEMPERING_ACTIVE && st.settings.tempering_end_ms > st.settings.tempering_start_ms) {
-        int64_t elapsed = now_ms - st.settings.tempering_start_ms;
+        int64_t elapsed = job_now_ms - st.settings.tempering_start_ms;
         int64_t total = st.settings.tempering_end_ms - st.settings.tempering_start_ms;
         if (elapsed < 0) elapsed = 0;
         if (elapsed > total) elapsed = total;
@@ -217,12 +226,27 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
 
     cJSON *json = cJSON_CreateObject();
     bool json_ok = json != NULL;
+    if (json_ok) json_ok = cJSON_AddStringToObject(json,"fault_clear_block_reason",shu1_safety_latch_clear_block_reason(&st.settings,&st.runtime))!=NULL;
+    if (json_ok) json_ok = cJSON_AddBoolToObject(json,"fault_clear_supported",true)!=NULL;
+    if (json_ok) json_ok = cJSON_AddBoolToObject(json,"fault_latched",shu1_safety_latch_is_set())!=NULL;
+    if (json_ok) json_ok = cJSON_AddBoolToObject(json,"fault_inhibited",shu1_safety_latch_is_inhibited())!=NULL;
+    if (json_ok) json_ok = cJSON_AddStringToObject(json,"fault_reason",shu1_heater_fault_str(shu1_safety_latch_fault()))!=NULL;
+    bool pending, persist_ok;
+    shu1_settings_deferred_status(&pending, &persist_ok);
+    if (json_ok) json_ok = cJSON_AddBoolToObject(json, "settings_pending", pending) != NULL;
+    if (json_ok) json_ok = cJSON_AddBoolToObject(json, "settings_persist_ok", persist_ok) != NULL;
     if (!diagnostics) {
         // Compact schema for GATT reads; notifications fall back to a read hint.
         if (json_ok) json_ok = cJSON_AddStringToObject(json, "v", SHU1_FW_VERSION) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(json, "on", st.settings.work_on) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(json, "paused", st.settings.user_paused) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json,"session_limit_min",st.settings.manual_session_max_min) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "sensor_freeze_warning_ms", (double)st.runtime.sensor_freeze_warning_ms) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "sensor_freeze_remaining_s", st.runtime.sensor_freeze_remaining_s) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "m", st.settings.work_mode) != NULL;
         if (json_ok) json_ok = shu1_wifi_status_json(json);
+        if (json_ok) json_ok = shu1_recorder_usage(json);
+        if (json_ok) json_ok = shu1_moonraker_setup_status(json);
         cJSON *prefs = json_ok ? cJSON_AddObjectToObject(json, "prefs") : NULL;
         json_ok = json_ok && prefs != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "virtual_door_detection_enabled", st.settings.virtual_door_detection_enabled) != NULL;
@@ -230,18 +254,12 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "auto_material_profile_enabled", st.settings.auto_material_profile_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "material_mismatch_warning_enabled", st.settings.material_mismatch_warning_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "pla_protection_enabled", st.settings.pla_protection_enabled) != NULL;
-        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "anti_warp_enabled", st.settings.anti_warp_enabled) != NULL;
-        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "large_print_protection_enabled", st.settings.large_print_protection_enabled) != NULL;
-        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "safe_overnight_enabled", st.settings.safe_overnight_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "pause_hold_enabled", st.settings.pause_hold_enabled) != NULL;
-        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "smart_resume_enabled", st.settings.smart_resume_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "start_print_warning_enabled", st.settings.start_print_warning_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "airflow_detection_enabled", st.settings.airflow_detection_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "temp_history_enabled", st.settings.temp_history_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "incident_report_enabled", st.settings.incident_report_enabled) != NULL;
-        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "local_recipes_enabled", st.settings.local_recipes_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "local_only_mode", st.settings.local_only_mode) != NULL;
-        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "contest_showcase_mode_enabled", st.settings.contest_showcase_mode_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "symbiont_mode_enabled", st.settings.symbiont_mode_enabled) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "symbiont_ventilation_allowed", st.settings.symbiont_ventilation_allowed) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "scheduled_preheat_enabled", st.settings.scheduled_preheat_enabled) != NULL;
@@ -265,6 +283,7 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "set", st.settings.work_mode == SHU1_MODE_PREHEAT ? st.settings.preheat_target_temp_c : st.settings.target_temp_c) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "tc", st.runtime.chamber_temp_c) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "tp", st.runtime.ptc_temp_c) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "target_now", st.runtime.heater_effective_target_c) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(json, "h", st.runtime.heater_output_on) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(json, "f", st.runtime.fan_output_on) != NULL;
         if (json_ok) json_ok = cJSON_AddStringToObject(json, "err", shu1_heater_fault_str(st.runtime.heater_fault)) != NULL;
@@ -457,7 +476,8 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
         return BLE_ATT_ERR_UNLIKELY;
     }
 
-    cJSON *root = cJSON_Parse(buf);
+    // ATT length excludes our terminator. Reject hidden suffixes before admission.
+    cJSON *root = memchr(buf, 0, (size_t)len) ? NULL : shu1_json_parse(buf);
     free(buf);
     if (!root) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
 
@@ -467,10 +487,12 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
         g_ble_unlocked = true;
         g_ble_lease_proven = false;
         ESP_LOGW(TAG, "BLE control unlocked for current session");
-        shu1_control_guard_end(&policy_guard);
-        cJSON_Delete(root);
-        shu1_ble_notify_status_now();
-        return 0;
+        if (!shu1_stop_requested(root)) {
+            shu1_control_guard_end(&policy_guard);
+            cJSON_Delete(root);
+            shu1_ble_notify_status_now();
+            return 0;
+        }
     }
 
 #if CONFIG_SHU1_BLE_REQUIRE_PIN_FOR_CONTROL
@@ -482,12 +504,37 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     }
 #endif
 
+    if (shu1_stop_requested(root)) {
+        shu1_settings_t stopped=shu1_state_get_settings();
+        if(cJSON_IsTrue(cJSON_GetObjectItem(root,"emergency_stop")))
+            shu1_safety_latch_trip_volatile(SHU1_HEATER_PANIC_OFF);
+        apply_safe_stop(&stopped);
+        shu1_control_release_any();
+        g_ble_lease_proven=false;
+        shu1_state_update_settings_command(&stopped);
+        shu1_safety_wake();
+        shu1_control_guard_end(&policy_guard);
+        cJSON_Delete(root);
+        shu1_ble_notify_status_now();
+        return 0;
+    }
+
     // Initial REST provisioning is local BLE, never an unauthenticated HTTP fallback.
     cJSON *wifi_setup = cJSON_GetObjectItemCaseSensitive(root, "wifi_setup");
     bool wifi_stop = cJSON_IsTrue(cJSON_GetObjectItem(root, "safe_stop")) ||
         cJSON_IsTrue(cJSON_GetObjectItem(root, "emergency_stop")) ||
         cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch")) ||
         cJSON_IsFalse(cJSON_GetObjectItem(root, "work_on"));
+    if(!wifi_stop && cJSON_GetObjectItemCaseSensitive(root,"printer_setup")) {
+        esp_err_t error=g_ble_unlocked ? shu1_moonraker_setup_request(root):ESP_ERR_INVALID_STATE;
+        cJSON_Delete(root);return error==ESP_OK ? 0:BLE_ATT_ERR_UNLIKELY;
+    }
+    if(!wifi_stop && (cJSON_GetObjectItem(root,"moonraker_host") || cJSON_GetObjectItem(root,"moonraker_port") || cJSON_GetObjectItem(root,"moonraker_api_key"))) {
+        cJSON_Delete(root);return BLE_ATT_ERR_UNLIKELY;
+    }
+    if(!wifi_stop && (cJSON_GetObjectItem(root,"wifi_ssid") || cJSON_GetObjectItem(root,"wifi_password"))) {
+        cJSON_Delete(root);return BLE_ATT_ERR_UNLIKELY; // Dedicated wifi_setup uses its worker.
+    }
     if (wifi_setup && !wifi_stop) {
         bool dedicated = true;
         for (cJSON *item = root->child; item; item = item->next) {
@@ -527,7 +574,9 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
             cJSON_Delete(root);
             return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
         }
+        shu1_control_guard_end(&policy_guard);
         esp_err_t err = shu1_settings_store_set_control_token(rest_token->valuestring);
+        policy_guard=shu1_control_guard_begin();
         shu1_control_maintenance_end();
         cJSON_Delete(root);
         return err == ESP_OK ? 0 : BLE_ATT_ERR_UNLIKELY;
@@ -698,9 +747,6 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
         st.material_mismatch_printer_profile = SHU1_PROFILE_CUSTOM;
         st.material_mismatch_detected_ms = 0;
     }
-    st.anti_warp_enabled = json_bool(root, "anti_warp_enabled", st.anti_warp_enabled);
-    st.large_print_protection_enabled = json_bool(root, "large_print_protection_enabled", st.large_print_protection_enabled);
-    st.safe_overnight_enabled = json_bool(root, "safe_overnight_enabled", st.safe_overnight_enabled);
     st.pause_hold_enabled = json_bool(root, "pause_hold_enabled", st.pause_hold_enabled);
     st.pause_hold_strategy = json_int_clamp(root, "pause_hold_strategy", st.pause_hold_strategy, SHU1_PAUSE_HOLD_KEEP, SHU1_PAUSE_HOLD_STOP_AFTER);
     st.pause_hold_min = json_int_clamp(root, "pause_hold_min", st.pause_hold_min, 1, 720);
@@ -742,17 +788,11 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     st.airflow_detection_enabled = json_bool(root, "airflow_detection_enabled", st.airflow_detection_enabled);
     st.pla_protection_enabled = json_bool(root, "pla_protection_enabled", st.pla_protection_enabled);
     st.pla_protection_confirmed = json_bool(root, "pla_protection_confirmed", st.pla_protection_confirmed);
-    st.smart_resume_enabled = json_bool(root, "smart_resume_enabled", st.smart_resume_enabled);
-    st.resume_recover_min = json_int_clamp(root, "resume_recover_min", st.resume_recover_min, 0, 120);
     st.post_print_pickup_mode = json_int_clamp(root, "post_print_pickup_mode", st.post_print_pickup_mode, SHU1_PICKUP_OFF, SHU1_PICKUP_NOTIFY_ONLY);
     st.pickup_keep_warm_min = json_int_clamp(root, "pickup_keep_warm_min", st.pickup_keep_warm_min, 1, 720);
     st.print_risk_enabled = json_bool(root, "print_risk_enabled", st.print_risk_enabled);
     st.start_print_warning_enabled = json_bool(root, "start_print_warning_enabled", st.start_print_warning_enabled);
-    st.local_recipes_enabled = json_bool(root, "local_recipes_enabled", st.local_recipes_enabled);
-    st.active_recipe_slot = json_int_clamp(root, "active_recipe_slot", st.active_recipe_slot, 0, 8);
     st.safety_score_enabled = json_bool(root, "safety_score_enabled", st.safety_score_enabled);
-    cJSON *recipe_name = cJSON_GetObjectItem(root, "active_recipe_name");
-    if (cJSON_IsString(recipe_name)) snprintf(st.active_recipe_name, sizeof(st.active_recipe_name), "%s", recipe_name->valuestring);
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "ack_filter_life_warning"))) st.filter_life_warning_pending = false;
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "ack_heater_wear_warning"))) st.heater_wear_warning_pending = false;
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "ack_airflow_warning"))) st.airflow_warning_pending = false;
@@ -777,7 +817,6 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     st.language_code = json_int_clamp(root, "language_code", st.language_code, SHU1_LANG_EN, SHU1_LANG_PL);
     st.local_only_mode = json_bool(root, "local_only_mode", st.local_only_mode);
     st.ota_enabled = json_bool(root, "ota_enabled", st.ota_enabled);
-    st.contest_showcase_mode_enabled = json_bool(root, "contest_showcase_mode_enabled", st.contest_showcase_mode_enabled);
     st.symbiont_mode_enabled = json_bool(root, "symbiont_mode_enabled", st.symbiont_mode_enabled);
     st.symbiont_ventilation_allowed = json_bool(root, "symbiont_ventilation_allowed", st.symbiont_ventilation_allowed);
     st.symbiont_safe_control_enabled = json_bool(root, "symbiont_safe_control_enabled", st.symbiont_safe_control_enabled);
@@ -935,10 +974,19 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
 
     // Calibration is idle-only and all ownership/revision checks have passed.
     esp_err_t calibration_error = ESP_OK;
+    if(calibration) {
+        if(!shu1_control_network_setup_begin()) {cJSON_Delete(root);return BLE_ATT_ERR_UNLIKELY;}
+        shu1_control_guard_end(&policy_guard);
+    }
     if (cJSON_IsNumber(chamber_offset))
         calibration_error = shu1_ntc_set_offset_c(0, (float)chamber_offset->valuedouble);
     if (calibration_error == ESP_OK && cJSON_IsNumber(ptc_offset))
         calibration_error = shu1_ntc_set_offset_c(1, (float)ptc_offset->valuedouble);
+    if(calibration) {
+        policy_guard=shu1_control_guard_begin();
+        st=shu1_state_get_settings();
+        shu1_control_maintenance_end();
+    }
     if (calibration_error != ESP_OK) {
         shu1_control_guard_end(&policy_guard);
         cJSON_Delete(root);
@@ -946,27 +994,12 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     }
     if (calibration) shu1_control_release_any(); // Advance revision for the accepted calibration.
     shu1_settings_limit_targets(&st);
-    esp_err_t persist_err = calibration ? ESP_OK : shu1_settings_store_save_settings(&st);
+    esp_err_t persist_err = calibration ? ESP_OK : shu1_settings_defer(&st);
 
-    cJSON *ssid = cJSON_GetObjectItem(root, "wifi_ssid");
-    cJSON *password = cJSON_GetObjectItem(root, "wifi_password");
-    cJSON *mh = cJSON_GetObjectItem(root, "moonraker_host");
-    cJSON *mp = cJSON_GetObjectItem(root, "moonraker_port");
-    if (cJSON_IsString(ssid) || cJSON_IsString(password) || cJSON_IsString(mh) || cJSON_IsNumber(mp)) {
-        shu1_device_config_t cfg;
-        shu1_device_config_defaults(&cfg);
-        shu1_settings_store_load_device_config(&cfg);
-        if (cJSON_IsString(ssid)) snprintf(cfg.wifi_ssid, sizeof(cfg.wifi_ssid), "%s", ssid->valuestring);
-        if (cJSON_IsString(password)) snprintf(cfg.wifi_password, sizeof(cfg.wifi_password), "%s", password->valuestring);
-        if (cJSON_IsString(mh)) snprintf(cfg.moonraker_host, sizeof(cfg.moonraker_host), "%s", mh->valuestring);
-        if (cJSON_IsNumber(mp)) cfg.moonraker_port = mp->valueint;
-        if (persist_err == ESP_OK) persist_err = shu1_settings_store_save_device_config(&cfg);
-        if (persist_err == ESP_OK) shu1_device_config_require_restart();
-    }
 
 
     if (persist_err != ESP_OK) {
-        // Writes may be partial: do not admit heat or pretend the command succeeded.
+        // The storage mailbox is unavailable: do not admit a new heating job.
         shu1_safety_latch_inhibit();
         shu1_settings_stop(&st);
         shu1_control_release_any();
@@ -998,6 +1031,16 @@ static int gatt_access_cb(uint16_t conn_handle, uint16_t attr_handle,
             build_status_json(payload, CONFIG_SHU1_BLE_MAX_READ_BYTES, false);
         } else if (chr == 3) {
             build_status_json(payload, CONFIG_SHU1_BLE_MAX_READ_BYTES, true);
+        } else if (chr == 5) {
+            cJSON *events=shu1_event_notifications();
+            bool ok=events && cJSON_PrintPreallocated(events,payload,CONFIG_SHU1_BLE_MAX_READ_BYTES,false);
+            cJSON_Delete(events);
+            if(!ok) {free(payload);return BLE_ATT_ERR_INSUFFICIENT_RES;}
+        } else if (chr == 4) {
+            if(conn_handle!=g_conn_handle) {free(payload);return BLE_ATT_ERR_UNLIKELY;}
+            // All long-read fragments use the snapshot frozen by the cursor write.
+            if(!g_history_payload) {free(payload);return BLE_ATT_ERR_UNLIKELY;}
+            memcpy(payload,g_history_payload,strlen(g_history_payload)+1);
         } else {
             free(payload);
             return BLE_ATT_ERR_UNLIKELY;
@@ -1008,6 +1051,22 @@ static int gatt_access_cb(uint16_t conn_handle, uint16_t attr_handle,
         return rc;
     }
 
+    // Query cursor only: four little-endian bytes, no control lease or actuator writes.
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR && chr == 4) {
+        uint8_t bytes[4];
+        if(conn_handle!=g_conn_handle || OS_MBUF_PKTLEN(ctxt->om)!=sizeof(bytes) ||
+            ble_hs_mbuf_to_flat(ctxt->om,bytes,sizeof(bytes),NULL)!=0) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+        const uint32_t after=(uint32_t)bytes[0] | (uint32_t)bytes[1]<<8 |
+            (uint32_t)bytes[2]<<16 | (uint32_t)bytes[3]<<24;
+        free(g_history_payload);g_history_payload=NULL;
+        cJSON *page=shu1_recorder_page(after);
+        char *snapshot=calloc(1,CONFIG_SHU1_BLE_MAX_READ_BYTES);
+        bool ok=page && snapshot && cJSON_PrintPreallocated(page,snapshot,CONFIG_SHU1_BLE_MAX_READ_BYTES,false);
+        cJSON_Delete(page);
+        if(!ok) {free(snapshot);return BLE_ATT_ERR_INSUFFICIENT_RES;}
+        g_history_payload=snapshot;
+        return 0;
+    }
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR && chr == 2) {
         ESP_LOGD(TAG, "BLE write control len=%u", (unsigned)OS_MBUF_PKTLEN(ctxt->om));
         return handle_control_write(ctxt);
@@ -1017,6 +1076,18 @@ static int gatt_access_cb(uint16_t conn_handle, uint16_t attr_handle,
 }
 
 static const struct ble_gatt_chr_def g_ble_chars[] = {
+    {
+        .uuid = &g_history_uuid.u,
+        .access_cb = gatt_access_cb,
+        .arg = (void *)4,
+        .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+    },
+    {
+        .uuid = &g_events_uuid.u,
+        .access_cb = gatt_access_cb,
+        .arg = (void *)5,
+        .flags = BLE_GATT_CHR_F_READ,
+    },
     {
         .uuid = &g_status_uuid.u,
         .access_cb = gatt_access_cb,
@@ -1103,6 +1174,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
             g_conn_handle = event->connect.conn_handle;
+            free(g_history_payload);g_history_payload=NULL;
             g_ble_unlocked = !CONFIG_SHU1_BLE_REQUIRE_PIN_FOR_CONTROL;
             g_ble_lease_proven = false;
             ESP_LOGI(TAG, "BLE connected handle=%d", g_conn_handle);
@@ -1114,6 +1186,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
+        free(g_history_payload);g_history_payload=NULL;
         ESP_LOGI(TAG, "BLE disconnected reason=%d", event->disconnect.reason);
         g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         g_ble_unlocked = false;

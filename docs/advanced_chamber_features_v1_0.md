@@ -1,5 +1,10 @@
 # SnapHeater U1 v1.0 advanced chamber feature pack
 
+> 2026-09-06: Anti-Warp, Large Print Protection, Safe Overnight, recipes and
+> Showcase metadata and legacy Smart Resume have been retired. Their descriptions/payload examples below
+> are historical, not supported controls. See [Current implementation](CURRENT_IMPLEMENTATION.md)
+> and [pause/history update](LOCAL_HISTORY_PAUSE_UPDATE.md) for current behavior.
+
 This document describes the v1.0 feature pack added after the BLE/Android, preheat/hold, material profiles, persistence, Moonraker and tempering work.
 
 The heater output is still disabled by default through `CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n`. All features are implemented as logic/API scaffolding first and must be tested after GPIO and sensor verification.

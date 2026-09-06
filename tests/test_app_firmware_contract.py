@@ -14,6 +14,46 @@ FIXTURES = ROOT / "apps/android/SnapHeaterU1/app/build/control-fixtures"
 class AppFirmwareContractTests(unittest.TestCase):
     compile = audit.AuditRegressionTests.compile
 
+    def test_legacy_smart_resume_removed_but_user_pause_remains(self):
+        paths=list((ROOT / "main").glob("*.[ch]"))
+        paths+=list((ROOT / "apps/android/SnapHeaterU1/app/src/main").rglob("*.kt"))
+        paths+=list((ROOT / "apps/android/SnapHeaterU1/app/src/main/res").rglob("*.xml"))
+        for path in paths:
+            text=path.read_text(encoding="utf-8")
+            for retired in ("smart_resume", "smartResume", "resume_recover"):
+                self.assertNotIn(retired,text,str(path))
+        self.assertIn('"pause_job"',source("job_commands.h"))
+        self.assertIn("if (!st->user_paused) update_heat_soak",source("safety.c"))
+
+    def test_pause_preserves_job_timers_and_off_cancels_resume(self):
+        self.compile(COMMON + r'''
+#include "job_commands.h"
+''' + function("app_state.c", "void shu1_settings_stop(") + r'''
+int main(void) {
+ shu1_settings_t s={0};
+ s.work_on=true; s.drying_running=true; s.drying_end_ms=61000;
+ s.tempering_start_ms=500; s.tempering_end_ms=60500;
+ cJSON *pause=cJSON_Parse("{\"pause_job\":true}");
+ cJSON *resume=cJSON_Parse("{\"pause_job\":false}");
+ shu1_finish_job_command(&s,pause,1000);
+ assert(s.user_paused && s.work_on && s.drying_running && s.drying_end_ms==61000);
+ shu1_finish_job_command(&s,pause,2000);
+ assert(s.user_pause_started_ms==1000);
+ shu1_finish_job_command(&s,resume,11000);
+ assert(!s.user_paused && s.drying_end_ms==71000);
+ assert(s.tempering_start_ms==10500 && s.tempering_end_ms==70500);
+ assert(s.preheat_end_ms==0);
+ shu1_finish_job_command(&s,resume,12000);
+ assert(s.drying_end_ms==71000);
+ shu1_finish_job_command(&s,pause,13000);
+ shu1_settings_stop(&s);
+ shu1_finish_job_command(&s,resume,20000);
+ assert(!s.work_on && !s.user_paused && !s.drying_running);
+ cJSON_Delete(pause); cJSON_Delete(resume);
+ return 0;
+}
+''', json=True)
+
     def test_real_kotlin_payloads_through_both_firmware_parsers(self):
         self.assertTrue((FIXTURES / "auto.json").exists(),
                         "Run apps/android/SnapHeaterU1/gradlew testDebugUnitTest first")
@@ -71,12 +111,12 @@ int main(void) {
  update_tempering(&s,1000+30*60000);
  assert(!s.work_on && s.tempering_complete_pending);
  shu1_settings_t idle={0};
- idle.heat_soak_enabled=true; idle.anti_warp_enabled=true; idle.pla_protection_enabled=true;
- idle.smart_resume_enabled=true; idle.temp_history_enabled=true;
+ idle.heat_soak_enabled=true; idle.pla_protection_enabled=true;
+ idle.temp_history_enabled=true;
  s=run(idle,preferences_json);
  assert(!s.work_on && !s.scheduled_preheat_enabled && !s.preheat_running && !s.drying_running);
- assert(!s.heat_soak_enabled && !s.anti_warp_enabled && !s.pla_protection_enabled);
- assert(!s.smart_resume_enabled && !s.temp_history_enabled);
+ assert(!s.heat_soak_enabled && !s.pla_protection_enabled);
+ assert(!s.temp_history_enabled);
  s=run(idle,schedule_json);
  assert(!s.work_on && s.scheduled_preheat_enabled);
  assert(s.scheduled_preheat_delay_min==17 && s.scheduled_preheat_target_c==43 && s.scheduled_preheat_hold_min==11);

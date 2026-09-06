@@ -1,6 +1,6 @@
 # Experimental functional tester build
 
-Local verification: fresh build passed; 43 unittest tests and the real-mutex
+Local verification for 0.9.9: build passed; 107 unittest tests and the real-mutex
 safety host test passed with the tester configuration used for the full-loop
 simulation. This does not establish hardware safety or successful device testing.
 

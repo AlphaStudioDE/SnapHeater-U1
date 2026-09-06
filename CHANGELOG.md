@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.9 — packaged testing prerelease
+
+- New public numbering: firmware/app 0.9.9, Android version code 3.
+- Includes autonomous jobs, pause, history catch-up/export, events, usage counters,
+  Moonraker configuration, Symbiont supervision and validated inactive-slot OTA.
+- Fixes Keep Warm reactivation after OFF, HTTP receive/drain blocking and BLE
+  embedded-NUL truncation. Version changes now reconfigure the ESP app descriptor.
+- Refreshed feature/status documentation, installation package, Android testing
+  APK, checksums, project story and supervised-testing risk notice.
+- 107 Python and 24 Android unit tests; host safety test and builds pass.
+- Not stable or hardware-qualified. Earlier 1.x entries are historical source labels.
+
 ## 2026-09-06 — Android and autonomous Panda integration
 
 - Refreshed localized Android UI, mode icons, app artwork and isolated preview.

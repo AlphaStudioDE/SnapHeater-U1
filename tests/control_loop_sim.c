@@ -10,22 +10,45 @@
 
 int64_t test_now_us=1000000;
 static jmp_buf done;
-static int tick,limit=8,scenario,rref=33;
+static int tick,limit=8,scenario,rref=33,freeze_warning_tick=-1;
 static int pins[22],high_writes,commits;
 static bool zc=true,wdt_ok=true,read_error,persist_error;
 static shu1_sensor_sample_t input;
 static void (*zc_isr)(void *);
 static char lease[SHU1_LEASE_ID_LEN+1];
 static int64_t lease_deadline;
+static void step_time(int milliseconds);
+static bool freeze_case(void) {return scenario==17 || (scenario>=50 && scenario<=55);}
 
 int gpio_set_level(int pin,int value) {assert(pin>=0 && pin<22);pins[pin]=value;if(pin==18 && value)++high_writes;return 0;}
 int gpio_config(const gpio_config_t *c) {return 0;}
 int gpio_install_isr_service(int flags) {return 0;}
 int gpio_isr_handler_add(int pin,void (*fn)(void *),void *arg) {assert(pin==7);zc_isr=fn;return 0;}
-esp_err_t shu1_ntc_read(shu1_sensor_sample_t *out) {*out=input;return read_error ? ESP_ERR_INVALID_STATE:ESP_OK;}
+esp_err_t shu1_ntc_read(shu1_sensor_sample_t *out) {
+    *out=input;
+    out->sequence=(uint32_t)tick+1;
+    out->started_us=out->completed_us=test_now_us;
+    // Ordinary stable temperatures still have raw ADC activity. Only the
+    // injected dual-freeze case has a bit-identical pair for five minutes.
+    out->chamber_raw=2000+(freeze_case() ? 0 : tick%2);
+    out->ptc_raw=2100+(freeze_case() ? 0 : tick%2);
+    if(scenario==50 && freeze_warning_tick>=0 && tick>=freeze_warning_tick+10)out->ptc_raw+=1+tick%2;
+    if(scenario==46 && tick>=2)out->sequence=2; // cached sequence, fresh timestamps
+    if(scenario==47 && tick==2)out->started_us-=2000000;
+    if(scenario==48 && tick==2)out->completed_us+=10000;
+    if(scenario==49 && tick==2) {step_time(1600);out->completed_us=test_now_us;}
+    if(scenario==17 && tick>=1250)out->chamber_raw++; // one sensor is insufficient after trip
+    if(scenario==17 && tick>=1260)out->ptc_raw++;
+    return read_error ? ESP_ERR_INVALID_STATE:ESP_OK;
+}
 int shu1_ntc_rref_kohm(void) {return rref;}
+float shu1_ntc_get_offset_c(int channel) {
+    return (scenario==59 && channel==1) || (scenario==60 && channel==0) ? -5.0f:0.0f;
+}
 void shu1_ble_notify_status_now(void) {}
-void shu1_event_log_add(const char *l,const char *c,const char *m) {}
+void shu1_event_log_add(const char *l,const char *c,const char *m) {
+    if(!strcmp(c,"sensor_raw_frozen") || !strcmp(c,"sensor_sample_stale"))assert(!pins[18]);
+}
 esp_err_t esp_task_wdt_add(void *t) {return wdt_ok ? ESP_OK:ESP_ERR_INVALID_STATE;}
 esp_err_t esp_task_wdt_reset(void) {return ESP_OK;}
 BaseType_t xTaskCreate(void (*fn)(void *),const char *n,unsigned s,void *a,unsigned p,TaskHandle_t *h) {return pdPASS;}
@@ -50,6 +73,30 @@ static void stop_command(void) {
     shu1_state_update_settings_command(&st);shu1_control_release_any();
 }
 static void inject(void) {
+    if(scenario>=51 && scenario<=55 && freeze_warning_tick>=0 && tick==freeze_warning_tick+10) {
+        if(scenario==51)stop_command();
+        if(scenario==52)input.ptc_instant_c=NAN;
+        if(scenario==53)zc=false;
+        if(scenario==54)input.ptc_instant_c=106;
+        if(scenario==55) {
+            SHU1_CONTROL_GUARD(g);
+            shu1_settings_t st=shu1_state_get_settings();st.user_paused=true;st.user_pause_started_ms=test_now_us/1000;
+            shu1_state_update_settings_command(&st);
+        }
+    }
+    if (scenario >= 43 && scenario <= 45 && tick == 2) {
+        SHU1_CONTROL_GUARD(g);
+        shu1_settings_t st=shu1_state_get_settings();
+        st.user_paused=true; st.user_pause_started_ms=test_now_us/1000;
+        shu1_state_update_settings_command(&st);
+    }
+    if (scenario==43 && tick==6) {
+        SHU1_CONTROL_GUARD(g);
+        shu1_settings_t st=shu1_state_get_settings(); st.user_paused=false;
+        shu1_state_update_settings_command(&st);
+    }
+    if (scenario==44 && tick==4) stop_command();
+    if (scenario==45 && tick==4) input.chamber_instant_c=NAN;
     if(scenario==37) {
         shu1_printer_state_t pr=shu1_state_get_printer();
         pr.moonraker_connected=true;pr.klippy_ready=true;pr.subscribed=true;
@@ -71,7 +118,7 @@ static void inject(void) {
         st.work_on=true;st.output_safety_latch_armed=true;
         shu1_state_update_settings_command(&st);
     }
-    if((scenario==18 || scenario==19 || scenario>=37) && tick==10) {
+    if((scenario==18 || scenario==19 || (scenario>=37 && scenario<=45)) && tick==10) {
         // Successful warm-up isolates lease timeout from the independent NO_RISE trip.
         input.chamber_c=input.chamber_instant_c=54;
         input.ptc_c=input.ptc_instant_c=60;
@@ -100,10 +147,44 @@ static void inject(void) {
     case 28: shu1_safety_latch_request_clear();zc=false;break;
     case 31: zc=false;break;
     case 32: input.chamber_instant_c=NAN;break;
+    case 59: input.ptc_instant_c=100;break; // uncorrected table 105, offset -5
+    case 60: input.chamber_instant_c=80;break; // uncorrected table 85, offset -5
+    case 61: {
+        shu1_settings_t st=shu1_state_get_settings();st.ptc_cutoff_c=104;
+        shu1_state_update_settings_command(&st);input.ptc_instant_c=99;break;
+    }
     }
 }
 uint32_t ulTaskNotifyTake(int clear,TickType_t ticks) {
+    // Scheduling boundary: run the production storage service after policy release.
+    shu1_safety_latch_service();
+    shu1_session_journal_service();
     shu1_runtime_t rt=shu1_state_get_runtime();
+    if ((scenario==59 || scenario==60) && tick>=2) {
+        assert(!pins[18] && shu1_safety_latch_is_set());
+        assert(rt.heater_fault==SHU1_HEATER_OVERTEMP);
+    }
+    if(scenario==61 && tick>=2) {
+        assert(!pins[18] && !shu1_safety_latch_is_set());
+        assert(g_ptc_foldback_active && shu1_fan_triac_is_active());
+    }
+    if(scenario>=56 && scenario<=58) {
+        if(scenario==56) {
+            if(tick==1)input.chamber_c=input.chamber_instant_c=52;
+            if(tick==2 || tick==3)assert(rt.symbiont_cooling && rt.symbiont_fan_percent==100 && !pins[18]);
+            if(tick==3)input.chamber_c=input.chamber_instant_c=47;
+            if(tick>=4)assert(!rt.symbiont_cooling && rt.symbiont_fan_percent==0);
+        }
+        if(scenario==57) {
+            if(tick==1)input.ptc_instant_c=106;
+            if(tick>=2)assert(!pins[18] && shu1_safety_latch_is_set() && shu1_fan_triac_is_active());
+        }
+        if(scenario==58 && tick>=1) {
+            assert(!shu1_state_get_printer().moonraker_connected);
+            assert(shu1_state_get_settings().work_on && !shu1_safety_latch_is_set());
+            assert(rt.heater_fault==SHU1_HEATER_OK);
+        }
+    }
     if(scenario>=37 && scenario<=41 && tick==605) {
         shu1_control_snapshot_t ctl;shu1_control_snapshot(&ctl);
         assert(ctl.owner==SHU1_CONTROL_LOCAL_JOB && !ctl.lease_active);
@@ -116,6 +197,15 @@ uint32_t ulTaskNotifyTake(int clear,TickType_t ticks) {
         assert(!shu1_state_get_settings().work_on && !pins[18] && shu1_safety_latch_is_set());
     }
     if(scenario==41 && tick>=632)assert(!shu1_state_get_settings().work_on && !pins[18]);
+    if(scenario>=43 && scenario<=45 && tick>=2 && (scenario!=43 || tick<6))assert(!pins[18]);
+    if(scenario>=46 && scenario<=49 && tick>=2) {
+        assert(!pins[18] && shu1_safety_latch_is_set());
+        assert(shu1_fan_triac_is_active() && !shu1_state_get_settings().work_on);
+        assert(rt.heater_fault==SHU1_HEATER_SENSOR_FAULT);
+    }
+    if(scenario==43 && tick>=6)assert(shu1_state_get_settings().work_on && !shu1_state_get_settings().user_paused);
+    if((scenario==44 || scenario==45) && tick>=4)assert(!shu1_state_get_settings().work_on && !shu1_state_get_settings().user_paused);
+    if(scenario==45 && tick>=4)assert(shu1_safety_latch_is_set());
     if(tick==0)assert(!pins[18]); // fan has not reached first ZC yet
     if(tick==1 && scenario<=12)assert(pins[18]); // baseline really exercised ON
     if(tick==1 && scenario>=18 && scenario!=24 && scenario!=30 && scenario!=42)assert(pins[18]);
@@ -194,11 +284,32 @@ uint32_t ulTaskNotifyTake(int clear,TickType_t ticks) {
     }
     if(scenario==25 && tick>=2)assert(!pins[18] && !shu1_safety_latch_is_set());
     if(scenario==26 && tick==2) {assert(!pins[18]);zc=false;}
-    if(scenario==17 && tick>=122) {
-        assert(!shu1_safety_latch_is_set());
-        // Two plausible frozen values close to target are not detectable as
-        // failed thermistors with these inputs alone. Record, do not hide, this limit.
-        assert(rt.heater_fault==SHU1_HEATER_OK);
+    if(scenario==17) {
+        if(rt.sensor_freeze_warning_ms>0 && freeze_warning_tick<0)freeze_warning_tick=tick;
+        if(freeze_warning_tick>=0 && tick<freeze_warning_tick+600) {
+            assert(!shu1_safety_latch_is_set() && shu1_state_get_settings().work_on);
+            assert(rt.sensor_freeze_remaining_s>0 && rt.sensor_freeze_remaining_s<=300);
+        }
+        if(freeze_warning_tick>=0 && tick==freeze_warning_tick+600)assert(shu1_safety_latch_is_set() && !pins[18]);
+        if(tick<600)assert(!shu1_safety_latch_is_set());
+        if(tick>=1200) {
+            assert(!pins[18] && !shu1_state_get_settings().work_on);
+            if(tick<1265)assert(shu1_safety_latch_is_set() && shu1_fan_triac_is_active());
+        }
+        if(tick==1220 || tick==1255 || tick==1264)shu1_safety_latch_request_clear();
+        if(tick>=1265)assert(!shu1_safety_latch_is_set());
+    }
+    if(scenario>=50 && scenario<=55) {
+        if(rt.sensor_freeze_warning_ms>0 && freeze_warning_tick<0)freeze_warning_tick=tick;
+        if(freeze_warning_tick>=0 && tick>=freeze_warning_tick+10) {
+            if(scenario==50)assert(!shu1_safety_latch_is_set() && shu1_state_get_settings().work_on && rt.sensor_freeze_warning_ms==0);
+            if(scenario==51)assert(!pins[18] && !shu1_safety_latch_is_set() && !shu1_state_get_settings().work_on && rt.sensor_freeze_warning_ms==0);
+            if(scenario>=52 && scenario<=54)assert(!pins[18] && shu1_safety_latch_is_set() && !shu1_state_get_settings().work_on);
+            if(scenario==55) {
+                assert(!pins[18]);
+                assert(shu1_safety_latch_is_set()==(tick>=freeze_warning_tick+600));
+            }
+        }
     }
     if(scenario==16 && tick==1) {
         assert(pins[18]);
@@ -222,7 +333,7 @@ int main(int argc,char **argv) {
     if(scenario==13)wdt_ok=false;
     if(scenario==24)zc=false;
     if(scenario==14)input.ptc_c=input.ptc_instant_c=60;
-    if(scenario==17) {input.chamber_c=input.chamber_instant_c=54;input.ptc_c=input.ptc_instant_c=60;limit=130;}
+    if(freeze_case()) {input.chamber_c=input.chamber_instant_c=54;input.ptc_c=input.ptc_instant_c=60;limit=1275;}
     shu1_state_init();assert(shu1_control_lease_init()==ESP_OK);
     assert(shu1_safety_latch_init()==ESP_OK);
     assert(shu1_heater_preinit_off()==ESP_OK && !pins[18] && !pins[3]);
@@ -268,6 +379,11 @@ int main(int argc,char **argv) {
     st.work_on=scenario!=14 && scenario!=15;
     st.work_mode=SHU1_MODE_POWER_ON;st.target_temp_c=55;st.cool_release_c=35;
     st.manual_session_max_min=120;
+    if(scenario>=56 && scenario<=58) {
+        st.target_temp_c=45;
+        st.symbiont_mode_enabled=st.symbiont_ventilation_allowed=st.symbiont_safe_control_enabled=true;
+        st.symbiont_policy=SHU1_SYMBIONT_POLICY_CLIMATE_SAFE;
+    }
     if(scenario==42) {
         st.work_on=false;st.scheduled_preheat_enabled=true;
         st.scheduled_preheat_start_ms=test_now_us/1000+310000;
@@ -301,9 +417,12 @@ int main(int argc,char **argv) {
         lease_deadline=test_now_us+(int64_t)SHU1_LEASE_TIMEOUT_MS*1000;
         limit=SHU1_LEASE_TIMEOUT_MS/500+5;
         if(scenario>=37)limit=735;
+        if(scenario>=43)limit=8;
+        if(scenario>=50 && scenario<=55)limit=1200;
     }
     if(!setjmp(done))control_task(NULL);
-    if(scenario==17)puts("OBSERVATION: plausible frozen sensors near target were NOT diagnosed; heating remained permitted");
+    if(freeze_case())assert(freeze_warning_tick>=0);
+    if(scenario==17)puts("Dual raw freeze stopped heating; unchanged and one-channel recovery could not clear; explicit clear after both changed did not restart heat");
     if(scenario==21)puts("Recovered ZC permits cooling only; heating remains latched and disarmed");
     printf("scenario=%d ticks=%d SSR_high_writes=%d fault=%s persisted=%d PASS\n",
         scenario,tick,high_writes,shu1_heater_fault_str(shu1_state_get_runtime().heater_fault),commits);

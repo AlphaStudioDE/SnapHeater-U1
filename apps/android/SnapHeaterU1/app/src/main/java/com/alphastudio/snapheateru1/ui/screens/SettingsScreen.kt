@@ -75,7 +75,6 @@ fun SettingsScreen(
                     steps = 24,
                 )
                 StatusRow(stringResource(R.string.label_material_profile), snapshot.material, valueColor = StatusColors.Normal)
-                StatusRow(stringResource(R.string.settings_active_recipe), snapshot.activeRecipeName)
                 StatusRow(stringResource(R.string.settings_max_ui_target), "55 °C")
             }
         }
@@ -101,20 +100,8 @@ fun SettingsScreen(
             ToggleRow(stringResource(R.string.settings_heat_soak_stability), snapshot.heatSoakEnabled) {
                 onSnapshotChange(snapshot.copy(heatSoakEnabled = it))
             }
-            ToggleRow(stringResource(R.string.settings_anti_warp), snapshot.antiWarpEnabled) {
-                onSnapshotChange(snapshot.copy(antiWarpEnabled = it))
-            }
-            ToggleRow(stringResource(R.string.settings_large_print), snapshot.largePrintProtectionEnabled) {
-                onSnapshotChange(snapshot.copy(largePrintProtectionEnabled = it))
-            }
-            ToggleRow(stringResource(R.string.settings_safe_overnight), snapshot.safeOvernightEnabled) {
-                onSnapshotChange(snapshot.copy(safeOvernightEnabled = it))
-            }
             ToggleRow(stringResource(R.string.settings_pause_hold), snapshot.pauseHoldEnabled) {
                 onSnapshotChange(snapshot.copy(pauseHoldEnabled = it))
-            }
-            ToggleRow(stringResource(R.string.settings_smart_resume), snapshot.smartResumeEnabled) {
-                onSnapshotChange(snapshot.copy(smartResumeEnabled = it))
             }
         }
 
@@ -131,9 +118,6 @@ fun SettingsScreen(
             }
             ToggleRow(stringResource(R.string.settings_incident_reports), snapshot.incidentReportEnabled) {
                 onSnapshotChange(snapshot.copy(incidentReportEnabled = it))
-            }
-            ToggleRow(stringResource(R.string.settings_local_recipes), snapshot.localRecipesEnabled) {
-                onSnapshotChange(snapshot.copy(localRecipesEnabled = it))
             }
             ToggleRow(stringResource(R.string.settings_scheduled_preheat), snapshot.scheduledPreheatEnabled) {
                 onSnapshotChange(snapshot.copy(scheduledPreheatEnabled = it))
@@ -166,15 +150,26 @@ fun SettingsScreen(
                 ToggleRow(stringResource(R.string.settings_local_only_mode), snapshot.localOnlyMode) {
                     onSnapshotChange(snapshot.copy(localOnlyMode = it))
                 }
-                ToggleRow(stringResource(R.string.settings_showcase_mode), snapshot.showcaseModeEnabled) {
-                    onSnapshotChange(snapshot.copy(showcaseModeEnabled = it))
+                Text(stringResource(R.string.ventilation_title))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(enabled = !busy, onClick = {
+                        onSnapshotChange(snapshot.copy(symbiontModeEnabled = false, symbiontVentilationAllowed = false))
+                    }) {
+                        ActionLabel(if (!snapshot.symbiontModeEnabled) Icons.Outlined.Check else Icons.Outlined.Autorenew, "Auto")
+                    }
+                    OutlinedButton(enabled = !busy, onClick = {
+                        onSnapshotChange(snapshot.copy(symbiontModeEnabled = true, symbiontVentilationAllowed = true))
+                    }) {
+                        ActionLabel(if (snapshot.symbiontModeEnabled) Icons.Outlined.Check else Icons.Outlined.Air, "Symbiont")
+                    }
                 }
-                ToggleRow(stringResource(R.string.settings_symbiont_mode), snapshot.symbiontModeEnabled) {
-                    onSnapshotChange(snapshot.copy(symbiontModeEnabled = it))
-                }
-                ToggleRow(stringResource(R.string.settings_symbiont_ventilation), snapshot.symbiontVentilationAllowed) {
-                    onSnapshotChange(snapshot.copy(symbiontVentilationAllowed = it))
-                }
+                Text(stringResource(R.string.ventilation_help), style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(when (snapshot.ventilationStatus) {
+                    "verified" -> R.string.ventilation_verified
+                    "correcting", "verifying" -> R.string.ventilation_pending
+                    "", "auto_or_idle" -> R.string.ventilation_inactive
+                    else -> R.string.ventilation_unavailable
+                }), style = MaterialTheme.typography.bodySmall)
                 Text(
                     stringResource(R.string.settings_cloud_note),
                     style = MaterialTheme.typography.bodySmall,

@@ -231,6 +231,20 @@ bool shu1_wifi_status_json(cJSON *root) {
     return ok;
 }
 
+static void reconnect_worker(void *unused) {
+    (void)unused;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(10000));
+        // Renew ONLY the saved runtime network, even after the initial attempts
+        // are exhausted. No printer discovery or configuration replacement.
+        if (!atomic_load(&ready) || atomic_load(&busy) || atomic_load(&testing) || atomic_load(&connected)) continue;
+        wifi_config_t cfg={0};
+        if (esp_wifi_get_config(WIFI_IF_STA,&cfg)==ESP_OK && cfg.sta.ssid[0])
+            (void)esp_wifi_connect();
+        memset(&cfg,0,sizeof(cfg));
+    }
+}
+
 esp_err_t shu1_wifi_start(void) {
     events = xEventGroupCreate();
     status_lock = xSemaphoreCreateMutex();
@@ -259,6 +273,7 @@ esp_err_t shu1_wifi_start(void) {
     memset(&wifi, 0, sizeof(wifi));
     ESP_ERROR_CHECK(esp_wifi_start());
     if (xTaskCreate(setup_worker, "wifi_setup", 6144, NULL, 3, NULL) != pdPASS) return ESP_ERR_NO_MEM;
+    if (xTaskCreate(reconnect_worker,"wifi_reconnect",2048,NULL,2,NULL)!=pdPASS) return ESP_ERR_NO_MEM;
     atomic_store(&ready, true);
     // Services can start without an IP and accept connections once Wi-Fi is ready.
     return ESP_OK;

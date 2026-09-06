@@ -1,5 +1,10 @@
 # Public safety status — September 2026
 
+> **Release 0.9.9: experimental supervised testing only.** See the
+> [installation guide](INSTALL_0.9.9.md) and [risk notice](HARDWARE_LIABILITY_DISCLAIMER.md).
+> Software checks: 107 Python tests, 24 Android unit tests, real-mutex safety test
+> and firmware/Android builds. Hardware qualification remains outstanding.
+
 SnapHeater U1 targets original Panda Breath electronics, not AirGuard 300.
 This is a development update, not a hardware-qualified or certified release.
 Do not treat successful compilation or simulated tests as permission to energize
@@ -57,8 +62,8 @@ task (nominally every 500 ms). ZC is not fan tachometry or proof of airflow.
 
 ## Verification and unresolved limits
 
-Offline verification includes 58 Python unittest tests, 43 production-control-loop
-simulation scenarios, a Kotlin payload test feeding both firmware parsers,
+Offline verification includes 107 Python unittest tests, 62 production-control-loop
+simulation scenarios, 24 Android unit tests including payloads feeding both firmware parsers,
 and a separate real-mutex safety host test. ESP-IDF 5.3.5
 builds for ESP32-C3 have passed in default and hardware-path compile configurations.
 Android `assembleDebug --offline` also passed.
@@ -77,5 +82,6 @@ Known limits remain:
 - Android transport compilation does not prove real-device BLE timing or OTA.
 
 Independent thermal protection and safe mains-work practices remain necessary.
-No flash dumps, device credentials, working audit archives or binary release
-images accompany this source update.
+No private flash dumps, device credentials or working audit archives are included
+in the 0.9.9 package. App-only firmware and a debug/testing APK are published as
+prerelease assets, not hardware-qualified stable images.

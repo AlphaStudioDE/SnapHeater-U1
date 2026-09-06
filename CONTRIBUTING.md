@@ -10,8 +10,13 @@ If you publish a fork or derivative work, clearly describe it as a fork or deriv
 
 ## Development status
 
-SnapHeater U1 is currently a firmware framework / development skeleton. Hardware outputs are intentionally safety-gated until GPIO mapping, sensors and heater behavior are verified on real hardware.
+SnapHeater U1 0.9.9 is an experimental testing prerelease. Functional output
+support is enabled; local runtime interlocks remain authoritative. Continuously
+supervise testing and report anomalies through the tester issue template.
+Do not attach credentials, full flash dumps or private device details.
 
 ## Safety
 
-Do not submit changes that bypass the Output Safety Latch, heater-output lock, sensor fault handling or setup validation without clearly documenting the reason and safety consequences.
+Do not bypass fault latches, sensor checks, ZC handling or OTA maintenance checks.
+Normal activation needs no separate manual arm step. Preserve DragonBreath
+attribution and add reproducible regression tests for safety-sensitive changes.

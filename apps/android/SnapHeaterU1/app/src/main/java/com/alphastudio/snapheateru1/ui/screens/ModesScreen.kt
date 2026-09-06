@@ -44,6 +44,8 @@ fun ModesScreen(
     var soak by rememberSaveable { mutableStateOf(snapshot.preheatHeatSoakMin.coerceIn(5, 45)) }
     var temper by rememberSaveable { mutableStateOf(snapshot.temperingDurationMin.coerceIn(10, 180)) }
     val selected = selectedName?.let { AppMode.valueOf(it) }
+    val dryingLimit=snapshot.sessionLimitMin.coerceIn(1,720)
+    LaunchedEffect(dryingLimit) { drying=drying.coerceIn(1,dryingLimit) }
     ScreenColumn {
         Text(stringResource(R.string.daily_choose), style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold)
@@ -75,9 +77,12 @@ fun ModesScreen(
                     ValueStepper(stringResource(R.string.dashboard_target), "$target °C",
                         target > 30, target < 55, { target-- }, { target++ })
                     when (selected) {
-                        AppMode.Drying -> ValueStepper(stringResource(R.string.label_drying_time), "$drying min",
-                            drying > 30, drying < 360, { drying = (drying - 15).coerceAtLeast(30) },
-                            { drying = (drying + 15).coerceAtMost(360) })
+                        AppMode.Drying -> Column {
+                            Text(stringResource(R.string.drying_session_limit, dryingLimit))
+                            ValueStepper(stringResource(R.string.label_drying_time), "$drying min",
+                            drying > 1, drying < dryingLimit, { drying = (drying - 15).coerceAtLeast(1) },
+                            { drying = (drying + 15).coerceAtMost(dryingLimit) })
+                        }
                         AppMode.Preheat -> ValueStepper(stringResource(R.string.label_heat_soak), "$soak min",
                             soak > 5, soak < 45, { soak = (soak - 5).coerceAtLeast(5) },
                             { soak = (soak + 5).coerceAtMost(45) })
@@ -94,7 +99,7 @@ fun ModesScreen(
                 enabled = heatingAllowed && (!selected.requiresPrinter() || printerAllowed),
                 onClick = {
                     onConfirmSettings(snapshot.copy(mode = selected, targetC = target,
-                        dryingTimeMin = drying, preheatHeatSoakMin = soak,
+                        dryingTimeMin = drying.coerceIn(1,dryingLimit), preheatHeatSoakMin = soak,
                         temperingDurationMin = temper, lastConfirmedSettings = modeLabel))
                 },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),

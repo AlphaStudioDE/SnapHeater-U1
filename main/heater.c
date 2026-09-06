@@ -8,6 +8,7 @@
 #include "app_state.h"
 #include "fan_triac.h"
 #include "safety_latch.h"
+#include "session_journal.h"
 #include "esp_log.h"
 #include "esp_check.h"
 #include "driver/gpio.h"
@@ -16,9 +17,6 @@
 #include <math.h>
 
 static const char *TAG = "shu1_heater";
-static bool g_last_logged_heater_on;
-static bool g_last_logged_fan_on;
-static bool g_output_log_initialized;
 
 static bool valid_gpio(int gpio) {
     return gpio >= 0 && gpio <= 21; // ESP32-C3 package dependent; verify actual module pins.
@@ -68,12 +66,8 @@ esp_err_t shu1_heater_init(void) {
 }
 
 void shu1_heater_set(bool heater_on, bool fan_on) {
-    if (!g_output_log_initialized || heater_on != g_last_logged_heater_on || fan_on != g_last_logged_fan_on) {
-        ESP_LOGW(TAG, "PHYSICAL OUTPUT REQUEST: heater=%d fan=%d", heater_on ? 1 : 0, fan_on ? 1 : 0);
-        g_last_logged_heater_on = heater_on;
-        g_last_logged_fan_on = fan_on;
-        g_output_log_initialized = true;
-    }
+    // Runtime output application must never call a UART/log sink, even after ON.
+    // Status/history record applied outputs from their own low-priority tasks.
     // Request airflow first. ON is applied by the fan ISR at the next validated
     // zero-cross; OFF is immediate. The SSR is never allowed on until that has happened.
     if (!heater_on || !fan_on) shu1_heater_cut_power();
@@ -81,6 +75,7 @@ void shu1_heater_set(bool heater_on, bool fan_on) {
 #if CONFIG_SHU1_ENABLE_HEATER_OUTPUT
     bool heater_interlock_ok = fan_on && shu1_fan_triac_is_running();
     bool physical_heater_on = heater_on && heater_interlock_ok &&
+        shu1_session_journal_ready() &&
         !shu1_safety_latch_is_set() && !shu1_safety_latch_is_inhibited();
     write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, physical_heater_on, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
 #else
@@ -108,7 +103,6 @@ void shu1_heater_cut_power(void) {
 }
 
 void shu1_heater_force_off(void) {
-    ESP_LOGW(TAG, "PHYSICAL OUTPUT FORCE OFF: heater=0 fan=0");
     write_gpio_if_valid(CONFIG_SHU1_HEATER_GPIO, false, CONFIG_SHU1_HEATER_ACTIVE_HIGH);
     shu1_fan_triac_force_off();
     write_gpio_if_valid(CONFIG_SHU1_STATUS_LED_GPIO, false, true);

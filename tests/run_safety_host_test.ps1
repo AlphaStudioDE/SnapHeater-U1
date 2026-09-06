@@ -12,6 +12,7 @@ try {
     }
     $compilerArgs = @("-std=c11", "-D_CRT_SECURE_NO_WARNINGS", "-Wall", "-Wextra", "-Werror",
         "-Itests/safety_stubs", "-Itests/stubs", "-Imain", "-I$ConfigDirectory",
+        "-I$env:IDF_PATH/components/json/cJSON",
         "main/app_state.c", "main/control_lease.c", "main/safety_latch.c",
         "tests/safety_state_host_test.c", "-o", $testExe)
     & $Compiler @compilerArgs

@@ -18,6 +18,7 @@ typedef struct {
     char wifi_password[65];
     char moonraker_host[64];
     int moonraker_port;
+    char moonraker_api_key[129];
 } shu1_device_config_t;
 
 void shu1_device_config_defaults(shu1_device_config_t *cfg);
@@ -28,6 +29,7 @@ esp_err_t shu1_settings_store_load_settings(shu1_settings_t *settings);
 esp_err_t shu1_settings_store_save_settings(const shu1_settings_t *settings);
 esp_err_t shu1_settings_store_load_device_config(shu1_device_config_t *cfg);
 esp_err_t shu1_settings_store_save_device_config(const shu1_device_config_t *cfg);
+esp_err_t shu1_settings_store_save_moonraker(const shu1_device_config_t *cfg);
 esp_err_t shu1_settings_store_factory_reset(void);
 // Caller holds policy guard and reserves cold/idle maintenance.
 esp_err_t shu1_settings_store_set_control_token(const char *token);

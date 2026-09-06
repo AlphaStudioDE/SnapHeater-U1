@@ -7,10 +7,13 @@
  * calibrated ADC voltage, 33/82 kOhm Rref strap and the stock 114-entry R/T table.
  */
 
+// ADC error reporting must not block the task before it can cut the SSR.
+#define LOG_LOCAL_LEVEL ESP_LOG_NONE
 #include "ntc.h"
 #include "app_config.h"
 #include <math.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_check.h"
 #include "esp_rom_sys.h"
 #include "driver/gpio.h"
@@ -21,14 +24,13 @@
 #include <stdatomic.h>
 
 #define SHU1_NTC_VSUPPLY_V 3.3f
-#define SHU1_NTC_RAW_OPEN_MIN 0xFFEU
-#define SHU1_NTC_RAW_SHORT_MAX 0x14U
 #define SHU1_NTC_TEMP_BASE_C 12
 #define SHU1_NTC_AVG_WINDOW 5
 #define SHU1_NTC_OFFSET_MAX_C 5.0f
 
 static const char *TAG = "shu1_ntc";
 static adc_oneshot_unit_handle_t g_adc;
+static uint32_t g_sample_sequence; // Only the control task acquires samples.
 static adc_cali_handle_t g_cali[2];
 static int g_rref_kohm;
 static float g_window[2][SHU1_NTC_AVG_WINDOW];
@@ -187,6 +189,10 @@ static esp_err_t read_channel(int index, int *raw_out, float *instant_out,
 
 esp_err_t shu1_ntc_read(shu1_sensor_sample_t *out) {
     if (!out || !g_ntc_ready) return ESP_ERR_INVALID_STATE;
+    out->sequence = 0;
+    out->completed_us = 0;
+    out->started_us = esp_timer_get_time();
+    out->chamber_raw = out->ptc_raw = 0;
     out->chamber_status = out->ptc_status = SHU1_SENSOR_INVALID;
     out->chamber_c = out->ptc_c = NAN;
     out->chamber_instant_c = out->ptc_instant_c = NAN;
@@ -197,6 +203,9 @@ esp_err_t shu1_ntc_read(shu1_sensor_sample_t *out) {
     if (read_channel(1, &out->ptc_raw, &out->ptc_instant_c,
                      &out->ptc_c, &out->ptc_status) != ESP_OK)
         out->ptc_status = SHU1_SENSOR_INVALID;
+    out->completed_us = esp_timer_get_time();
+    if (++g_sample_sequence == 0) ++g_sample_sequence;
+    out->sequence = g_sample_sequence;
     return ESP_OK;
 }
 

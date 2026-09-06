@@ -91,6 +91,8 @@ typedef struct {
 
 typedef struct {
     bool work_on;
+    bool user_paused;
+    int64_t user_pause_started_ms;
     int work_mode;
     int drying_mode;
     bool drying_running;
@@ -144,9 +146,6 @@ typedef struct {
     int material_mismatch_user_profile;       // Profile chosen in app/SnapHeater.
     int material_mismatch_printer_profile;    // Profile detected from Snapmaker U1 active tool/material.
     int64_t material_mismatch_detected_ms;
-    bool anti_warp_enabled;                   // Smooth chamber control for ABS/ASA/PETG large prints.
-    bool large_print_protection_enabled;      // Prefer stability, less aggressive target changes and longer post-run.
-    bool safe_overnight_enabled;              // Conservative limits and mandatory printer freshness for unattended prints.
 
     // Pause behavior is intentionally user configurable. Pause/error from U1 is not a local heater fault.
     bool pause_hold_enabled;
@@ -224,10 +223,6 @@ typedef struct {
     bool pla_protection_enabled;
     bool pla_protection_confirmed;
     bool pla_protection_pending;
-    bool smart_resume_enabled;
-    int resume_recover_min;
-    bool resume_recover_active;
-    int64_t resume_recover_end_ms;
     int post_print_pickup_mode;
     int pickup_keep_warm_min;
     bool pickup_active;
@@ -237,9 +232,6 @@ typedef struct {
     bool print_risk_warning_pending;
     bool start_print_warning_enabled;
     bool start_print_warning_pending;
-    bool local_recipes_enabled;
-    int active_recipe_slot;
-    char active_recipe_name[32];
     bool safety_score_enabled;
     int safety_score;
     bool setup_validation_passed;
@@ -268,7 +260,6 @@ typedef struct {
     bool ota_enabled;
     bool ota_rollback_placeholder_enabled;
     int ota_status;
-    bool contest_showcase_mode_enabled;
 
     // U1 Symbiont Mode: friendly, explicit cooperation with Snapmaker U1.
     // Default policy remains read-only; climate/ventilation cooperation may be
@@ -316,12 +307,15 @@ typedef struct {
     char heater_constraint[24];
     bool fan_output_on;
     shu1_heater_fault_t heater_fault;
+    int64_t sensor_freeze_warning_ms;
+    int sensor_freeze_remaining_s;
     int64_t last_sensor_ms;
     int64_t last_heat_off_ms;
     shu1_rise_detector_t rise_detector;
 
     // Energy/stability statistics for Android summaries.
     uint64_t heater_on_accum_ms;
+    uint64_t heater_usage_35c_ms; // Lifetime usage increment; energy accounting stays unfiltered.
     uint64_t session_heater_on_ms;
     float estimated_energy_wh;
     float session_energy_wh;
@@ -375,6 +369,8 @@ typedef struct {
     char incident_summary[256];
     bool output_safety_latch_ready;
     char symbiont_status[192];
+    bool symbiont_cooling;
+    int symbiont_fan_percent;
 
     uint64_t zero_cross_edges;
     uint64_t zero_cross_rejected_edges;
@@ -410,6 +406,7 @@ bool shu1_control_start_allowed(void);
 bool shu1_control_outputs_busy(void);
 bool shu1_control_schedule_allowed(void);
 bool shu1_control_maintenance_begin(void);
+bool shu1_control_checkpoint_begin(void);
 bool shu1_control_network_setup_begin(void);
 void shu1_control_maintenance_end(void);
 void shu1_settings_stop(shu1_settings_t *settings);

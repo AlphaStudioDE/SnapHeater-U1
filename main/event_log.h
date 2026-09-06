@@ -16,6 +16,7 @@ extern "C" {
 void shu1_event_log_init(void);
 void shu1_event_log_add(const char *level, const char *code, const char *message);
 cJSON *shu1_event_log_to_json(void);
+cJSON *shu1_event_notifications(void);
 uint32_t shu1_event_log_count(void);
 
 #ifdef __cplusplus

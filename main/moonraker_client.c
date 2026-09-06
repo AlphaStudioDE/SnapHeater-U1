@@ -6,10 +6,17 @@
 
 #include "moonraker_client.h"
 #include "ws_message_buffer.h"
+#include "json_guard.h"
 #include "app_config.h"
 #include "app_state.h"
 #include "settings_store.h"
 #include "event_log.h"
+#include "printer_setup_rules.h"
+#include "symbiont_engine.h"
+#include "control_lease.h"
+#include "safety_latch.h"
+#include "freertos/queue.h"
+#include <stdatomic.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -32,6 +39,53 @@ static shu1_ws_buffer_t g_rx;
 
 static esp_websocket_client_handle_t g_client = NULL;
 static shu1_device_config_t g_devcfg;
+typedef struct {shu1_device_config_t cfg;char id[33];} setup_request_t;
+static QueueHandle_t g_setup_queue;
+static portMUX_TYPE g_setup_mux=portMUX_INITIALIZER_UNLOCKED;
+static char g_setup_id[33],g_setup_phase[24]="idle";
+static bool g_key_set;
+static atomic_bool g_setup_ws_valid;
+static portMUX_TYPE g_symbiont_mux=portMUX_INITIALIZER_UNLOCKED;
+static shu1_symbiont_engine_t g_symbiont;
+static bool g_symbiont_aux, g_symbiont_top;
+static const char *CONTROL_QUERY="{\"jsonrpc\":\"2.0\",\"id\":103,\"method\":\"printer.objects.query\",\"params\":{\"objects\":{\"print_stats\":[\"state\"],\"heater_bed\":[\"temperature\",\"target\"],\"webhooks\":[\"state\"]}}}";
+
+static void setup_phase(const char *phase) {
+    portENTER_CRITICAL(&g_setup_mux);
+    snprintf(g_setup_phase,sizeof(g_setup_phase),"%s",phase);
+    portEXIT_CRITICAL(&g_setup_mux);
+}
+bool shu1_moonraker_setup_status(cJSON *root) {
+    char id[33],phase[24];bool key;
+    portENTER_CRITICAL(&g_setup_mux);
+    memcpy(id,g_setup_id,sizeof(id));memcpy(phase,g_setup_phase,sizeof(phase));key=g_key_set;
+    portEXIT_CRITICAL(&g_setup_mux);
+    cJSON *status=cJSON_AddObjectToObject(root,"printer_setup");
+    bool ok = status && cJSON_AddStringToObject(status,"id",id) &&
+        cJSON_AddStringToObject(status,"phase",phase) && cJSON_AddBoolToObject(status,"key_set",key);
+    portENTER_CRITICAL(&g_symbiont_mux);
+    const char *vent_status=g_symbiont.status ? g_symbiont.status:"auto_or_idle";
+    portEXIT_CRITICAL(&g_symbiont_mux);
+    return ok && cJSON_AddStringToObject(root,"ventilation_status",vent_status);
+}
+esp_err_t shu1_moonraker_setup_request(const cJSON *root) {
+    setup_request_t request;
+    if(!g_setup_queue || !shu1_printer_setup_parse(root,&request.cfg,request.id)) return ESP_ERR_INVALID_ARG;
+    shu1_control_snapshot_t ctl;shu1_control_snapshot(&ctl);
+    const cJSON *rev=cJSON_GetObjectItemCaseSensitive(root,"expected_revision");
+    if(!cJSON_IsNumber(rev) || rev->valuedouble!=(double)ctl.revision ||
+       !shu1_control_network_setup_begin()) {memset(&request,0,sizeof(request));return ESP_ERR_INVALID_STATE;}
+    portENTER_CRITICAL(&g_setup_mux);
+    memcpy(g_setup_id,request.id,sizeof(g_setup_id));
+    strcpy(g_setup_phase,"testing");
+    portEXIT_CRITICAL(&g_setup_mux);
+    if(xQueueSend(g_setup_queue,&request,0)!=pdTRUE) {
+        memset(&request,0,sizeof(request));setup_phase("busy");shu1_control_maintenance_end();return ESP_ERR_INVALID_STATE;
+    }
+    memset(&request,0,sizeof(request));
+    shu1_control_release_any();
+    return ESP_OK;
+}
 static int g_rpc_id = 2000;
 static int64_t g_last_connect_try_ms = 0;
 static int64_t g_last_autodetect_try_ms = 0;
@@ -216,18 +270,23 @@ static void autodetect_from_object_array(cJSON *arr) {
     ESP_LOGI(TAG, "U1 object autodetect: chamber='%s', cavity_fan='%s'", g_chamber_object, g_cavity_fan_object[0] ? g_cavity_fan_object : "-");
 }
 
-static char *http_get_alloc(const char *path, int timeout_ms) {
-    if (!path || !g_devcfg.moonraker_host[0]) return NULL;
+static char *http_get_for(const shu1_device_config_t *device, const char *path, int timeout_ms, int *status_code) {
+    if(status_code) *status_code=0;
+    if (!path || !device->moonraker_host[0]) return NULL;
     char url[192];
-    snprintf(url, sizeof(url), "http://%s:%d%s", g_devcfg.moonraker_host, g_devcfg.moonraker_port, path);
+    snprintf(url, sizeof(url), "http://%s:%d%s", device->moonraker_host, device->moonraker_port, path);
 
     esp_http_client_config_t cfg = {
         .url = url,
         .timeout_ms = timeout_ms,
         .buffer_size = 1024,
+        .disable_auto_redirect = true, // Never forward the API key to a redirect target.
     };
     esp_http_client_handle_t h = esp_http_client_init(&cfg);
     if (!h) return NULL;
+    if(device->moonraker_api_key[0] && esp_http_client_set_header(h,"X-Api-Key",device->moonraker_api_key)!=ESP_OK) {
+        esp_http_client_cleanup(h);return NULL;
+    }
 
     esp_err_t err = esp_http_client_open(h, 0);
     if (err != ESP_OK) {
@@ -238,6 +297,7 @@ static char *http_get_alloc(const char *path, int timeout_ms) {
     int status = esp_http_client_fetch_headers(h);
     (void)status;
     int code = esp_http_client_get_status_code(h);
+    if(status_code) *status_code=code;
     if (code != 200) {
         esp_http_client_close(h);
         esp_http_client_cleanup(h);
@@ -251,21 +311,26 @@ static char *http_get_alloc(const char *path, int timeout_ms) {
         return NULL;
     }
     int total = 0;
+    const int64_t deadline=esp_timer_get_time()+6000000;
     while (total < SHU1_MOONRAKER_OBJECT_LIST_BUF) {
+        if(esp_timer_get_time()>deadline) break;
         int r = esp_http_client_read(h, buf + total, SHU1_MOONRAKER_OBJECT_LIST_BUF - total);
         if (r <= 0) break;
         total += r;
     }
     buf[total] = 0;
+    bool complete=esp_http_client_is_complete_data_received(h);
     esp_http_client_close(h);
     esp_http_client_cleanup(h);
+    if(!complete) {free(buf);return NULL;}
     return buf;
 }
+static char *http_get_alloc(const char *path, int timeout_ms) {return http_get_for(&g_devcfg,path,timeout_ms,NULL);}
 
 static cJSON *fetch_object_list(void) {
     char *payload = http_get_alloc("/printer/objects/list", SHU1_MOONRAKER_HTTP_TIMEOUT_MS);
     if (!payload) return NULL;
-    cJSON *root = cJSON_Parse(payload);
+    cJSON *root = shu1_json_parse(payload);
     free(payload);
     if (!root) return NULL;
     return root;
@@ -300,6 +365,7 @@ static void send_subscription(bool autodetect) {
     }
     if (g_has_chamber_subscription && g_chamber_object[0]) append_obj(msg, sizeof(msg), &first, g_chamber_object, "[\"temperature\"]");
     if (g_cavity_fan_object[0]) append_obj(msg, sizeof(msg), &first, g_cavity_fan_object, "[\"speed\"]");
+    if (g_symbiont_top) append_obj(msg, sizeof(msg), &first, "purifier", "[\"power_detected\",\"critical_temp_reported\",\"fan_fault_reported\",\"exhaust_fan\"]");
 
     size_t used = strlen(msg);
     snprintf(msg + used, sizeof(msg) - used, "}},\"id\":%d}", autodetect ? 102 : 101);
@@ -322,6 +388,8 @@ static void moonraker_autodetect_and_subscribe(void) {
     }
 
     cJSON *arr = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "result"), "objects");
+    g_symbiont_aux=object_array_contains(arr,"fan_generic cavity_fan");
+    g_symbiont_top=object_array_contains(arr,"purifier");
     autodetect_from_object_array(arr);
 
     g_has_tool_temp_subscription = object_array_contains(arr, "extruder") || object_array_contains(arr, "extruder1") ||
@@ -486,11 +554,14 @@ static void parse_moonraker_message(const char *data, int len) {
     if (!copy) return;
     memcpy(copy, data, len);
 
-    cJSON *root = cJSON_Parse(copy);
+    cJSON *root = shu1_json_parse(copy);
     free(copy);
     if (!root) return;
 
     cJSON *result = cJSON_GetObjectItem(root, "result");
+    portENTER_CRITICAL(&g_symbiont_mux);
+    shu1_symbiont_response(&g_symbiont,root,now_ms());
+    portEXIT_CRITICAL(&g_symbiont_mux);
     int msg_id = cJSON_GetObjectItem(root, "id") ? cJSON_GetObjectItem(root, "id")->valueint : 0;
 
     if (cJSON_IsObject(result)) {
@@ -515,6 +586,7 @@ static void parse_moonraker_message(const char *data, int len) {
         }
         cJSON *status = cJSON_GetObjectItem(result, "status");
         if (cJSON_IsObject(status)) {
+            if(msg_id==103 && shu1_printer_control_subset(status)) atomic_store(&g_setup_ws_valid,true);
             parse_object_update(status);
             mark_online(true);
             cJSON_Delete(root);
@@ -527,6 +599,9 @@ static void parse_moonraker_message(const char *data, int len) {
         cJSON *params = cJSON_GetObjectItem(root, "params");
         cJSON *status = cJSON_IsArray(params) ? cJSON_GetArrayItem(params, 0) : NULL;
         if (cJSON_IsObject(status)) {
+            portENTER_CRITICAL(&g_symbiont_mux);
+            shu1_symbiont_notify(&g_symbiont,status,now_ms());
+            portEXIT_CRITICAL(&g_symbiont_mux);
             parse_object_update(status);
             mark_online(true);
         }
@@ -561,6 +636,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED: {
+        g_symbiont_aux=g_symbiont_top=false;
         memset(&g_rx, 0, sizeof(g_rx));
         ESP_LOGI(TAG, "Moonraker websocket connected");
         g_subscribe_pending = false;
@@ -606,17 +682,76 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
     }
 }
 
-static void moonraker_task(void *arg) {
-    (void)arg;
-    shu1_device_config_defaults(&g_devcfg);
-    shu1_settings_store_load_device_config(&g_devcfg);
-    if (g_devcfg.moonraker_port <= 0 || g_devcfg.moonraker_port > 65535) g_devcfg.moonraker_port = 7125;
+static void clear_printer_context(void) {
+    shu1_printer_state_t empty={0};
+    shu1_state_update_printer(&empty);
+    memset(&g_rx,0,sizeof(g_rx));
+    g_subscribe_pending=g_autodetect_pending=g_autodetect_done=false;
+    g_has_tool_temp_subscription=g_has_chamber_subscription=false;
+    strcpy(g_chamber_object,"temperature_sensor cavity");g_cavity_fan_object[0]=0;
+    g_last_autodetect_try_ms=0;g_last_connect_try_ms=0;
+    atomic_store(&g_setup_ws_valid,false);
+    g_symbiont_aux=g_symbiont_top=false;
+    portENTER_CRITICAL(&g_symbiont_mux);
+    g_symbiont.active=false;g_symbiont.pending=0;g_symbiont.phase=0;
+    g_symbiont.status="disconnected";
+    portEXIT_CRITICAL(&g_symbiont_mux);
+}
 
+static void symbiont_poll(void) {
+    static shu1_state_t state; // Sole Moonraker worker; avoid a large task-stack snapshot.
+    shu1_state_get(&state);
+    const shu1_settings_t *st=&state.settings;
+    const shu1_runtime_t *rt=&state.runtime;
+    const int64_t now=now_ms();
+    bool active=st->symbiont_mode_enabled && st->symbiont_ventilation_allowed &&
+        st->symbiont_safe_control_enabled && st->symbiont_policy==SHU1_SYMBIONT_POLICY_CLIMATE_SAFE &&
+        st->work_on && !st->user_paused && rt->heater_effective_target_c>0 &&
+        rt->chamber_sensor_status==SHU1_SENSOR_OK && rt->ptc_sensor_status==SHU1_SENSOR_OK &&
+        rt->last_sensor_ms>0 && now>=rt->last_sensor_ms && now-rt->last_sensor_ms<=1500 &&
+        rt->heater_fault==SHU1_HEATER_OK && !shu1_safety_latch_is_set() &&
+        !shu1_safety_latch_is_inhibited() && !shu1_control_maintenance_active();
+    bool connected=g_client && esp_websocket_client_is_connected(g_client) &&
+        state.printer.klippy_ready && state.printer.subscribed;
+    char message[512];
+    portENTER_CRITICAL(&g_symbiont_mux);
+    bool send=shu1_symbiont_next(&g_symbiont,active,connected,g_symbiont_aux,
+        g_symbiont_top,rt->symbiont_fan_percent,now,message,sizeof(message));
+    const char *status=g_symbiont.status ? g_symbiont.status:"auto_or_idle";
+    portEXIT_CRITICAL(&g_symbiont_mux);
+    static bool reported_loss;
+    bool unavailable=active && (!strcmp(status,"disconnected") || !strcmp(status,"unsupported_fan") ||
+        !strcmp(status,"command_error") || !strcmp(status,"invalid_data") ||
+        !strcmp(status,"timeout") || !strcmp(status,"top_cover_fault"));
+    if(unavailable && !reported_loss) {
+        shu1_event_log_add("warn","symbiont_control_lost","Printer ventilation control unavailable; Panda thermal protections remain active");
+        reported_loss=true;
+    } else if(reported_loss && active && !strcmp(status,"verified")) {
+        shu1_event_log_add("info","symbiont_control_restored","Printer ventilation readback matches current request");
+        reported_loss=false;
+    } else if(!active) reported_loss=false;
+    // Never hold the thermal policy guard during network I/O. One bounded
+    // in-flight packet can finish after OFF/Auto; there is no queued replay.
+    if(send) send_json(message);
+}
+static bool stop_client(void) {
+    if(g_client) {
+        (void)esp_websocket_client_stop(g_client);
+        if(esp_websocket_client_destroy(g_client)!=ESP_OK) return false;
+        g_client=NULL;
+    }
+    clear_printer_context();
+    return true;
+}
+static bool create_client(void) {
+    if(!g_devcfg.moonraker_host[0]) return false;
     char uri[192];
     snprintf(uri, sizeof(uri), "ws://%s:%d/websocket", g_devcfg.moonraker_host, g_devcfg.moonraker_port);
-
+    char headers[160]="";
+    if(g_devcfg.moonraker_api_key[0]) snprintf(headers,sizeof(headers),"X-Api-Key: %s\r\n",g_devcfg.moonraker_api_key);
     esp_websocket_client_config_t websocket_cfg = {
         .uri = uri,
+        .headers = headers,
         .network_timeout_ms = 5000,
         .buffer_size = 4096,
         .reconnect_timeout_ms = SHU1_MOONRAKER_WS_RECONNECT_MS,
@@ -624,17 +759,100 @@ static void moonraker_task(void *arg) {
     g_client = esp_websocket_client_init(&websocket_cfg);
     if (!g_client) {
         ESP_LOGE(TAG, "websocket init failed");
-        vTaskDelete(NULL);
-        return;
+        return false;
     }
-    esp_websocket_register_events(g_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, NULL);
+    if(esp_websocket_register_events(g_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, NULL)!=ESP_OK) {
+        esp_websocket_client_destroy(g_client);g_client=NULL;return false;
+    }
+    return true;
+}
+static const char *probe_printer(const shu1_device_config_t *candidate) {
+    int code=0;
+    char *body=http_get_for(candidate,"/server/info",1500,&code);
+    if(!body) return code==401 || code==403 ? "auth_failed":"unreachable";
+    cJSON *root=shu1_json_parse(body);free(body);
+    const cJSON *result=cJSON_GetObjectItemCaseSensitive(root,"result");
+    const char *state=cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(result,"klippy_state"));
+    bool ready=state && !strcmp(state,"ready");cJSON_Delete(root);
+    if(!ready) return "printer_not_ready";
+    body=http_get_for(candidate,"/printer/objects/query?print_stats&heater_bed&webhooks",1500,&code);
+    if(!body) return code==401 || code==403 ? "auth_failed":"unreachable";
+    root=shu1_json_parse(body);free(body);
+    result=cJSON_GetObjectItemCaseSensitive(root,"result");
+    bool valid=shu1_printer_control_subset(cJSON_GetObjectItemCaseSensitive(result,"status"));
+    cJSON_Delete(root);
+    return valid ? NULL:"missing_data";
+}
+static void apply_setup(setup_request_t *request) {
+    const char *error=probe_printer(&request->cfg);
+    shu1_device_config_t old=g_devcfg;
+    bool switched=false;
+    if(!error) {
+        setup_phase("connecting");
+        if(!stop_client()) {error="client_stop_failed";shu1_safety_latch_inhibit();}
+        else {
+            switched=true;g_devcfg=request->cfg;
+            if(!create_client() || esp_websocket_client_start(g_client)!=ESP_OK) error="websocket_failed";
+            else {
+                const int64_t deadline=now_ms()+20000;
+                while(now_ms()<deadline) {
+                    if(esp_websocket_client_is_connected(g_client)) {
+                        shu1_printer_state_t pr=shu1_state_get_printer();
+                        if(pr.klippy_ready && !pr.subscribed && !g_subscribe_pending) send_subscription(false);
+                        send_json(CONTROL_QUERY);
+                        if(pr.klippy_ready && pr.subscribed && atomic_load(&g_setup_ws_valid) && pr.last_update_ms>0 && now_ms()-pr.last_update_ms<1500) break;
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                }
+                shu1_printer_state_t pr=shu1_state_get_printer();
+                if(!esp_websocket_client_is_connected(g_client) || !pr.klippy_ready || !pr.subscribed ||
+                   !atomic_load(&g_setup_ws_valid) || pr.last_update_ms<=0 ||
+                   now_ms()-pr.last_update_ms<0 || now_ms()-pr.last_update_ms>=1500) error="websocket_failed";
+            }
+        }
+    }
+    if(!error) {
+        setup_phase("saving");
+        if(shu1_settings_store_save_moonraker(&request->cfg)!=ESP_OK) {
+            error="storage_failed";
+            if(shu1_settings_store_save_moonraker(&old)!=ESP_OK) shu1_safety_latch_inhibit();
+        }
+    }
+    if(error && switched) {
+        if(stop_client()) {g_devcfg=old;(void)create_client();}
+        else shu1_safety_latch_inhibit();
+    }
+    if(!error) {
+        portENTER_CRITICAL(&g_setup_mux);g_key_set=g_devcfg.moonraker_api_key[0]!=0;portEXIT_CRITICAL(&g_setup_mux);
+    }
+    memset(&old,0,sizeof(old));memset(request,0,sizeof(*request));
+    // No thermal loop or network operation ran while holding the policy guard.
+    SHU1_CONTROL_GUARD(guard);
+    shu1_control_release_any();
+    setup_phase(error ? error:"succeeded");
+    shu1_control_maintenance_end();
+    shu1_event_log_add(error ? "warn":"info",error ? "printer_setup_failed":"printer_setup_saved",
+        error ? "printer configuration test failed; previous configuration retained":"printer configuration tested and applied without reboot");
+}
+static void moonraker_task(void *arg) {
+    (void)arg;
+    shu1_device_config_defaults(&g_devcfg);
+    shu1_settings_store_load_device_config(&g_devcfg);
+    if (g_devcfg.moonraker_port <= 0 || g_devcfg.moonraker_port > 65535) g_devcfg.moonraker_port = 7125;
+    portENTER_CRITICAL(&g_setup_mux);g_key_set=g_devcfg.moonraker_api_key[0]!=0;portEXIT_CRITICAL(&g_setup_mux);
+    (void)create_client();
 
+    int64_t last_control_query=0;
     while (true) {
+        setup_request_t request;
+        if(xQueueReceive(g_setup_queue,&request,0)==pdTRUE) {apply_setup(&request);continue;}
+        symbiont_poll();
+        if(!g_client) {(void)create_client();vTaskDelay(pdMS_TO_TICKS(500));continue;}
         if (!esp_websocket_client_is_connected(g_client)) {
             int64_t now = now_ms();
             if (now - g_last_connect_try_ms >= SHU1_MOONRAKER_WS_RECONNECT_MS) {
                 g_last_connect_try_ms = now;
-                ESP_LOGI(TAG, "connecting to %s", uri);
+                ESP_LOGI(TAG, "connecting to configured Moonraker");
                 esp_websocket_client_start(g_client);
             }
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -657,6 +875,8 @@ static void moonraker_task(void *arg) {
             send_subscription(false);
         }
 
+        if(now-last_control_query<1000) {vTaskDelay(pdMS_TO_TICKS(100));continue;}
+        last_control_query=now;
         // Query the complete control subset, because subscriptions send only changes.
         send_json("{\"jsonrpc\":\"2.0\",\"id\":103,\"method\":\"printer.objects.query\","
                   "\"params\":{\"objects\":{\"print_stats\":[\"state\"],"
@@ -665,11 +885,14 @@ static void moonraker_task(void *arg) {
         char ping[96];
         snprintf(ping, sizeof(ping), "{\"id\":%d,\"jsonrpc\":\"2.0\",\"method\":\"server.info\"}", g_rpc_id++);
         send_json(ping);
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
 esp_err_t shu1_moonraker_start(void) {
+    g_setup_queue=xQueueCreate(1,sizeof(setup_request_t));
+    if(!g_setup_queue) return ESP_ERR_NO_MEM;
     BaseType_t ok = xTaskCreate(moonraker_task, "moonraker_ws", 8192, NULL, 5, NULL);
-    return ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
+    if(ok!=pdPASS) {vQueueDelete(g_setup_queue);g_setup_queue=NULL;return ESP_ERR_NO_MEM;}
+    return ESP_OK;
 }

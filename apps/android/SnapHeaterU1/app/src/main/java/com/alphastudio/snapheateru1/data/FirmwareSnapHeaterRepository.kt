@@ -16,6 +16,7 @@ class FirmwareSnapHeaterRepository(
 ) : SnapHeaterRepository {
     private var leaseId: String = ""
     private var revision: Long = -1
+    override fun clearFault(): HeaterSnapshot = clearFaultAndVerify({snapshot()},{command(it)})
 
     override fun snapshot(): HeaterSnapshot {
         if (leaseId.isNotBlank()) {
@@ -34,7 +35,7 @@ class FirmwareSnapHeaterRepository(
 
     private fun command(payload: JSONObject): HeaterSnapshot {
         if (leaseId.isNotBlank()) payload.put("lease_id", leaseId)
-        if (revision >= 0) payload.put("expected_revision", revision)
+        if (!payload.has("expected_revision") && revision >= 0) payload.put("expected_revision", revision)
         return rememberControl(client.postSettings(payload).toHeaterSnapshot())
     }
 
@@ -53,9 +54,15 @@ class FirmwareSnapHeaterRepository(
     override fun setTarget(targetC: Int): HeaterSnapshot {
         return command(JSONObject().put("set_temp", targetC).put("takeover", true))
     }
+    override fun pauseJob(paused: Boolean, expectedRevision: Long): HeaterSnapshot =
+        command(JSONObject().put("pause_job", paused).put("takeover", true).put("expected_revision", expectedRevision))
 
-    override fun configurePrinter(host: String, port: Int, ssid: String, password: String): HeaterSnapshot =
-        command(printerConfiguration(host, port, ssid, password))
+    override fun configurePrinter(host: String, port: Int, apiKey: String): HeaterSnapshot {
+        snapshot()
+        val payload=printerConfiguration(host,port,apiKey)
+        val id=payload.getJSONObject("printer_setup").getString("id")
+        return awaitPrinterSetup(id,command(payload),{snapshot()})
+    }
 
     override fun applySettings(snapshot: HeaterSnapshot): HeaterSnapshot = command(snapshot.jobPayload())
 
@@ -64,6 +71,7 @@ class FirmwareSnapHeaterRepository(
 
     override fun applySafety(snapshot: HeaterSnapshot, armLatch: Boolean, disarmLatch: Boolean): HeaterSnapshot {
         val payload = JSONObject()
+            .put("expected_revision", snapshot.controlStateRevision)
             .put("output_safety_latch_enabled", true)
             .put("heater_output_verified", snapshot.heaterOutputVerified)
             .put("fan_output_verified", snapshot.fanOutputVerified)
@@ -103,9 +111,22 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
     val progress = (printer.optDouble("progress", 0.0) * 100.0).toInt().coerceIn(0, 100)
 
     return HeaterSnapshot(
+        settingsPersistenceKnown=has("settings_pending") && has("settings_persist_ok"),
+        settingsPending=optBoolean("settings_pending",false),
+        settingsPersistOk=optBoolean("settings_persist_ok",false),
+        sessionLimitMin=settings.optInt("manual_session_max_min",720).coerceIn(1,720),
+        faultClearSupported=optBoolean("fault_clear_supported",false),
+        faultLatched=optBoolean("fault_latched",false),
+        faultInhibited=optBoolean("fault_inhibited",false),
+        faultReason=optString("fault_reason",""),
+        faultClearBlockReason=optString("fault_clear_block_reason",""),
         firmwareVersion = optString("fw_version", "unknown"),
         chamberC = runtime.optDouble("warehouse_temper", 0.0).toInt(),
         ptcC = runtime.optDouble("ptc_temp", 0.0).toInt(),
+        historyReadingValid = runtime.optDouble("warehouse_temper", Double.NaN).isFinite() &&
+            runtime.optDouble("ptc_temp", Double.NaN).isFinite() &&
+            runtime.optString("warehouse_sensor_status")=="ok" && runtime.optString("ptc_sensor_status")=="ok",
+        effectiveTargetC = runtime.optInt("heater_effective_target_c", 0),
         targetC = settings.optInt("set_temp", 45),
         safetyScore = runtime.optInt("safety_score", settings.optInt("safety_score", 0)),
         setupValidationPassed = runtime.optBoolean("setup_validation_passed", settings.optBoolean("setup_validation_passed", false)),
@@ -131,6 +152,16 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         activeMaterial = printer.optString("active_material", material).ifBlank { material },
         materialAdvice = runtime.optString("material_advice", "$material profile selected").ifBlank { "$material profile selected" },
         mode = mode,
+        paused = settings.optBoolean("paused", false),
+        printerSetupId = optJSONObject("printer_setup")?.optString("id").orEmpty(),
+        printerSetupPhase = optJSONObject("printer_setup")?.optString("phase").orEmpty(),
+        ventilationStatus = optString("ventilation_status", ""),
+        printerApiKeySet = optJSONObject("printer_setup")?.optBoolean("key_set",false) ?: false,
+        sensorFreezeWarningMs = runtime.optLong("sensor_freeze_warning_ms", 0),
+        sensorFreezeRemainingS = runtime.optInt("sensor_freeze_remaining_s", 0),
+        usageAvailable = optBoolean("usage_available", false),
+        heaterUsageMs = optLong("usage_heater_ms", 0),
+        filterUsageMs = optLong("usage_filter_ms", 0),
         manualFanAssist = runtime.optBoolean("fan_output_on", false),
         preheatHeatSoakMin = settings.optInt("preheat_hold_min", 15),
         dryingTimeMin = settings.optInt("custom_timer", 2).coerceAtLeast(1) * 60,
@@ -150,11 +181,7 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         autoMaterialProfileEnabled = settings.optBoolean("auto_material_profile_enabled", true),
         mismatchWarningEnabled = settings.optBoolean("material_mismatch_warning_enabled", true),
         plaProtectionEnabled = settings.optBoolean("pla_protection_enabled", true),
-        antiWarpEnabled = settings.optBoolean("anti_warp_enabled", true),
-        largePrintProtectionEnabled = settings.optBoolean("large_print_protection_enabled", true),
-        safeOvernightEnabled = settings.optBoolean("safe_overnight_enabled", false),
         pauseHoldEnabled = settings.optBoolean("pause_hold_enabled", true),
-        smartResumeEnabled = settings.optBoolean("smart_resume_enabled", true),
         startPrintWarningEnabled = settings.optBoolean("start_print_warning_enabled", true),
         airflowDetectionEnabled = settings.optBoolean("airflow_detection_enabled", true),
         airflowWarningPending = runtime.optBoolean("airflow_warning_pending", false),
@@ -165,11 +192,8 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         sessionEnergyWh = runtime.optDouble("session_energy_wh", 0.0).toInt(),
         tempHistoryEnabled = settings.optBoolean("temp_history_enabled", true),
         incidentReportEnabled = settings.optBoolean("incident_report_enabled", true),
-        localRecipesEnabled = settings.optBoolean("local_recipes_enabled", true),
-        activeRecipeName = settings.optString("active_recipe_name", "Recipe").ifBlank { "Recipe" },
         scheduledPreheatEnabled = settings.optBoolean("scheduled_preheat_enabled", false),
         localOnlyMode = settings.optBoolean("local_only_mode", true),
-        showcaseModeEnabled = settings.optBoolean("contest_showcase_mode_enabled", false),
         symbiontModeEnabled = settings.optBoolean("symbiont_mode_enabled", false),
         symbiontVentilationAllowed = settings.optBoolean("symbiont_ventilation_allowed", false),
         otaRollbackReady = optJSONObject("ota")?.optJSONObject("inactive_slot")

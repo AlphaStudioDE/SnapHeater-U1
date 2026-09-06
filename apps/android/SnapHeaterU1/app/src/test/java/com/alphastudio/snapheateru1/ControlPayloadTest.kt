@@ -20,7 +20,7 @@ class ControlPayloadTest {
             "tempering" to base.copy(mode = AppMode.Tempering).jobPayload(),
             "stop" to base.copy(mode = AppMode.SafeStop).jobPayload(),
             "preferences" to base.copy(mode = AppMode.SafeStop, heatSoakEnabled = false,
-                antiWarpEnabled = false, plaProtectionEnabled = false, smartResumeEnabled = false,
+                plaProtectionEnabled = false,
                 tempHistoryEnabled = false).preferencesPayload(),
             "schedule" to base.schedulePayload(),
             "cancel_schedule" to base.copy(scheduledPreheatEnabled = false).schedulePayload())

@@ -26,6 +26,12 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 
 class SnapHeaterBleException(message: String) : Exception(message)
 
@@ -34,23 +40,58 @@ class SnapHeaterBleGattClient(
     private val address: String,
 ) {
     private val unlockPayload = """{"unlock":"123456"}"""
-
-    suspend fun readStatus(): String = withConnectedSession { session ->
-        delay(350L)
-        session.readString(SnapHeaterBleContract.StatusCharacteristicUuid)
+    companion object {
+        private val deviceLocks=java.util.concurrent.ConcurrentHashMap<String,StopPriorityGate>()
+        private val eventReads=java.util.concurrent.ConcurrentHashMap<String,kotlinx.coroutines.Job>()
+    }
+    suspend fun readEvents(): String = advisoryRead { session -> session.readString(SnapHeaterBleContract.EventsCharacteristicUuid) }
+    suspend fun readHistory(after: Long): String = advisoryRead { session ->
+        require(after in 0..4294967295L)
+        val bytes=ByteArray(4) { index -> (after shr (8*index)).toByte() }
+        session.writeBytes(SnapHeaterBleContract.HistoryCharacteristicUuid,bytes)
+        session.readString(SnapHeaterBleContract.HistoryCharacteristicUuid)
+    }
+    private suspend fun advisoryRead(block: suspend (GattSession)->String): String = coroutineScope {
+        val key=address.uppercase()
+        val read=async { withConnectedSession(block=block) }
+        eventReads.put(key,read)?.cancel()
+        try { read.await() }
+        catch(cancelled: kotlinx.coroutines.CancellationException) {
+            currentCoroutineContext().ensureActive()
+            throw SnapHeaterBleException("Event read yielded to device control")
+        } finally { eventReads.remove(key,read) }
     }
 
-    suspend fun writeControl(payload: String): String = withConnectedSession { session ->
+    suspend fun readStatus(): String {
+        eventReads[address.uppercase()]?.cancel()
+        return withConnectedSession { session ->
+        delay(350L)
+        session.readString(SnapHeaterBleContract.StatusCharacteristicUuid)
+        }
+    }
+
+    suspend fun writeControl(payload: String): String {
+        eventReads[address.uppercase()]?.cancel()
+        val json=org.json.JSONObject(payload)
+        val stop=json.optBoolean("safe_stop") || json.optBoolean("emergency_stop") ||
+            json.optBoolean("disarm_output_safety_latch") ||
+            (json.has("work_on") && json.opt("work_on") == false)
+        return withConnectedSession(stop) { session ->
         delay(350L)
         session.writeString(SnapHeaterBleContract.ControlCharacteristicUuid, unlockPayload)
         delay(150L)
         session.writeString(SnapHeaterBleContract.ControlCharacteristicUuid, payload)
         delay(150L)
         session.readString(SnapHeaterBleContract.StatusCharacteristicUuid)
+        }
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun <T> withConnectedSession(block: suspend (GattSession) -> T): T {
+    private suspend fun <T> withConnectedSession(stop: Boolean = false, block: suspend (GattSession) -> T): T =
+        deviceLocks.computeIfAbsent(address.uppercase()) { StopPriorityGate() }.run(stop) { connectedSession(block) }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun <T> connectedSession(block: suspend (GattSession) -> T): T {
         val manager = context.getSystemService(BluetoothManager::class.java)
             ?: throw SnapHeaterBleException("Bluetooth manager is not available")
         val adapter = manager.adapter ?: throw SnapHeaterBleException("Bluetooth adapter is not available")
@@ -138,18 +179,20 @@ class GattSession(
     }
 
     @SuppressLint("MissingPermission")
-    suspend fun writeString(uuid: UUID, payload: String): Unit = withTimeout(8000L) {
+    suspend fun writeString(uuid: UUID, payload: String): Unit = writeBytes(uuid,payload.toByteArray(StandardCharsets.UTF_8))
+
+    @SuppressLint("MissingPermission")
+    suspend fun writeBytes(uuid: UUID, bytes: ByteArray): Unit = withTimeout(8000L) {
         suspendCancellableCoroutine { continuation ->
             val characteristic = service.getCharacteristic(uuid)
                 ?: run {
                     continuation.resumeWithException(SnapHeaterBleException("BLE characteristic not found"))
                     return@suspendCancellableCoroutine
                 }
-            val bytes = payload.toByteArray(StandardCharsets.UTF_8)
             callback.pendingWrite = PendingWrite(uuid, continuation)
             characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
             val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gatt.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS
+                gatt.writeCharacteristic(characteristic, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == android.bluetooth.BluetoothStatusCodes.SUCCESS
             } else {
                 characteristic.value = bytes
                 gatt.writeCharacteristic(characteristic)
@@ -162,8 +205,8 @@ class GattSession(
     }
 
     fun close() {
-        runCatching { gatt.disconnect() }
-        runCatching { gatt.close() }
+        try { gatt.disconnect() } catch (_: SecurityException) { /* Permission revoked during session. */ }
+        try { gatt.close() } catch (_: SecurityException) { /* Permission revoked during session. */ }
     }
 }
 
@@ -193,7 +236,7 @@ class SessionCallback(
             @SuppressLint("MissingPermission")
             val mtuStarted = gatt.requestMtu(247)
             if (!mtuStarted) {
-                val started = gatt.discoverServices()
+                val started = try { gatt.discoverServices() } catch (_: SecurityException) { false }
                 if (!started) onConnectFailed("BLE service discovery could not start")
             }
         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {

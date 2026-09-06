@@ -1,5 +1,10 @@
 # SnapHeater U1 Local API
 
+> 2026-09-06: Anti-Warp, Large Print Protection, Safe Overnight, recipes and
+> Showcase metadata and legacy Smart Resume have been retired. Their descriptions/payload examples below
+> are historical, not supported controls. See [Current implementation](CURRENT_IMPLEMENTATION.md)
+> and [pause/history update](LOCAL_HISTORY_PAUSE_UPDATE.md) for current behavior.
+
 The API intentionally uses simple JSON fields close to the user-facing semantics discovered in the multi-version analysis. The implementation is new and project-owned.
 
 Every mutating REST request requires `X-DragonBreath-Auth` matching the stored
@@ -9,6 +14,17 @@ through a PIN-unlocked BLE session using the dedicated `rest_token` command.
 New tokens must contain 16–64 characters. Existing nonempty credentials continue
 to work. The server intentionally sends no CORS headers. Use a trusted LAN;
 this bearer-token HTTP interface is not an encrypted transport.
+
+## Connection and receive limits
+
+The server handles one request per TCP connection and replies with
+`Connection: close`. Clients must reconnect for subsequent requests. All GET
+routes and `POST /api/v2/boot-inactive` reject nonempty bodies with HTTP 400,
+without draining the supplied body. This also applies to early handler exits.
+Header reception has a 2-second budget from connection acceptance; ordinary
+body reception has a 2-second budget, OTA reception 60 seconds. A pending socket
+read can take up to its separate 1-second timeout before closure. These budgets
+do not depend on the client continuing to send individual bytes.
 
 ## GET /api/health
 
@@ -121,7 +137,10 @@ off. Firmware then:
 1. selects only `esp_ota_get_next_update_partition(NULL)`;
 2. rejects empty/oversized input;
 3. streams the image through `esp_ota_write` while calculating SHA-256;
-4. lets `esp_ota_end` validate the ESP image;
+4. compares the received whole-file SHA-256 with the required 64-hex-digit
+   `X-SnapHeater-SHA256` request header before `esp_ota_end` and boot selection;
+   missing/malformed headers are rejected before flash writes, and mismatches
+   abort the upload and invalidate its first sector; `esp_ota_end` then validates the ESP image;
 5. accepts only project identities `SnapHeater_U1`, `dragonbreath` or stock
    `panda_breath` and erases the first sector of a rejected image;
 6. selects the new boot slot only after all checks pass;
@@ -136,8 +155,14 @@ curl -X POST http://DEVICE/api/settings \
   -d '{"ota_enabled":true}'
 curl -X POST http://DEVICE/update \
   -H "X-DragonBreath-Auth: TOKEN" -H "Content-Type: application/octet-stream" \
+  -H "X-SnapHeater-SHA256: $(sha256sum build/SnapHeater_U1.bin | cut -d ' ' -f1)" \
   --data-binary @build/SnapHeater_U1.bin
 ```
+
+Clients must send this header with every OTA upload; older clients without it
+receive `expected_sha256_required`. A differing hash returns `sha256_mismatch`
+without selecting the uploaded image or scheduling a restart. This checks
+transfer integrity, not authenticity: no signing key or signature is required.
 
 Authenticated `POST /api/v2/boot-inactive` selects and reboots into an already
 bootable inactive image only when its identity is one of the three accepted
@@ -179,6 +204,14 @@ To request clearing a persisted heater fault, send
 `{"clear_heater_fault":true}`. This first safe-stops all heat workflows and
 does not clear the latch unless the control task sees idle operation, valid
 sensors and temperatures below both hard cutoffs.
+The request is a one-shot attempt, not a deferred clear: if conditions are unsafe,
+send a new request after resolving the fault. Clearing does not restart heating.
+Acquisition freshness failures and suspected dual-raw freezes use `sensor_fault`;
+see [sensor diagnostics](SENSOR_DIAGNOSTICS.md) for detection and recovery limits.
+`runtime.sensor_freeze_warning_ms` identifies a pending early warning (zero if
+none); `runtime.sensor_freeze_remaining_s` reports Panda-owned time remaining.
+The compact BLE status exposes the same keys at its root. A pending warning is
+not a fault-clear opportunity and acknowledgement cannot alter its deadline.
 
 Modes:
 
@@ -571,3 +604,28 @@ The firmware automatically applies runtime conditions before physical heating.
 Legacy `arm_output_safety_latch` is inert; `disarm_output_safety_latch` is
 unconditional OFF, including when mixed with start fields. A fault still rejects
 new work until cleared; clearing never resumes a stopped session.
+# Moonraker connection changes
+
+Use the dedicated authenticated `printer_setup` settings command described in
+[Moonraker setup](MOONRAKER_SETUP.md). Flat Moonraker configuration writes are
+rejected; Panda tests the candidate before saving it and does not require reboot.
+# Transport and persistence notes (firmware 0.9.9)
+
+Control JSON must be a complete object (maximum nesting depth 16, body 2048
+bytes). The receive loop has a total 2-second budget and 1-second socket waits.
+Malformed, incomplete and unauthorized requests close the connection; clients
+must not automatically retry energizing commands. OFF does not require a matching
+revision. Other Android job/schedule/resume commands use the revision of the
+state on which the user acted, not a later background response.
+
+`settings_pending` means active RAM settings have not yet been acknowledged by
+durable storage. `settings_persist_ok=false` means storage was unavailable or the
+last attempt failed. Pending storage retries when cold and idle. This status does
+not imply that the heating job will resume after a reboot.
+
+OTA requests close their connection after the response, including rejection.
+`inactive_upload_not_verified` rejects boot-inactive for a slot with a pending
+upload marker. `ota_marker_failed` rejects an update when its persistent admission
+record cannot be written. A successful full upload/validation clears that marker;
+reboot and factory settings reset do not bypass it. SHA-256 is transfer integrity,
+not image authenticity; signatures remain intentionally outside this design.

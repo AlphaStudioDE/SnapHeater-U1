@@ -29,6 +29,13 @@ void shu1_device_id(char *out, size_t size) {
 }
 
 static atomic_bool g_device_config_restart_required;
+typedef struct {
+    uint32_t version;
+    char host[64];
+    uint32_t port;
+    char key[129];
+} moonraker_record_t;
+typedef struct { uint32_t version; char ssid[33], password[65]; } wifi_record_t;
 void shu1_device_config_require_restart(void) {
     atomic_store(&g_device_config_restart_required, true);
 }
@@ -80,7 +87,8 @@ void shu1_device_config_defaults(shu1_device_config_t *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     snprintf(cfg->wifi_ssid, sizeof(cfg->wifi_ssid), "%s", CONFIG_SHU1_WIFI_SSID);
     snprintf(cfg->wifi_password, sizeof(cfg->wifi_password), "%s", CONFIG_SHU1_WIFI_PASSWORD);
-    snprintf(cfg->moonraker_host, sizeof(cfg->moonraker_host), "%s", CONFIG_SHU1_MOONRAKER_HOST);
+    // No implicit connection to a sample address, even in older sdkconfig files.
+    cfg->moonraker_host[0]=0;
     cfg->moonraker_port = CONFIG_SHU1_MOONRAKER_PORT;
 }
 
@@ -111,9 +119,6 @@ esp_err_t shu1_settings_store_load_settings(shu1_settings_t *s) {
     if (nvs_get_i32(h, "temp_min", &v) == ESP_OK) s->tempering_duration_min = v;
     if (nvs_get_i32(h, "auto_prof", &v) == ESP_OK) s->auto_material_profile_enabled = v != 0;
     if (nvs_get_i32(h, "mat_warn", &v) == ESP_OK) s->material_mismatch_warning_enabled = v != 0;
-    if (nvs_get_i32(h, "antiwarp", &v) == ESP_OK) s->anti_warp_enabled = v != 0;
-    if (nvs_get_i32(h, "largeprt", &v) == ESP_OK) s->large_print_protection_enabled = v != 0;
-    if (nvs_get_i32(h, "night", &v) == ESP_OK) s->safe_overnight_enabled = v != 0;
     if (nvs_get_i32(h, "pause_en", &v) == ESP_OK) s->pause_hold_enabled = v != 0;
     if (nvs_get_i32(h, "pause_st", &v) == ESP_OK) s->pause_hold_strategy = v;
     if (nvs_get_i32(h, "pause_min", &v) == ESP_OK) s->pause_hold_min = v;
@@ -147,14 +152,10 @@ esp_err_t shu1_settings_store_load_settings(shu1_settings_t *s) {
     if (nvs_get_i32(h, "wear_pct", &v) == ESP_OK) s->heater_wear_warning_pct = v;
     if (nvs_get_i32(h, "air_en", &v) == ESP_OK) s->airflow_detection_enabled = v != 0;
     if (nvs_get_i32(h, "pla_en", &v) == ESP_OK) s->pla_protection_enabled = v != 0;
-    if (nvs_get_i32(h, "resume_en", &v) == ESP_OK) s->smart_resume_enabled = v != 0;
-    if (nvs_get_i32(h, "resume_m", &v) == ESP_OK) s->resume_recover_min = v;
     if (nvs_get_i32(h, "pickup", &v) == ESP_OK) s->post_print_pickup_mode = v;
     if (nvs_get_i32(h, "pickup_m", &v) == ESP_OK) s->pickup_keep_warm_min = v;
     if (nvs_get_i32(h, "risk_en", &v) == ESP_OK) s->print_risk_enabled = v != 0;
     if (nvs_get_i32(h, "start_warn", &v) == ESP_OK) s->start_print_warning_enabled = v != 0;
-    if (nvs_get_i32(h, "recipes", &v) == ESP_OK) s->local_recipes_enabled = v != 0;
-    if (nvs_get_i32(h, "recipe", &v) == ESP_OK) s->active_recipe_slot = v;
     if (nvs_get_i32(h, "safety_en", &v) == ESP_OK) s->safety_score_enabled = v != 0;
     if (nvs_get_i32(h, "setup_wiz", &v) == ESP_OK) s->first_setup_wizard_enabled = v != 0;
     if (nvs_get_i32(h, "setup_step", &v) == ESP_OK) s->first_setup_step = v;
@@ -172,7 +173,6 @@ esp_err_t shu1_settings_store_load_settings(shu1_settings_t *s) {
     if (nvs_get_i32(h, "lang", &v) == ESP_OK) s->language_code = v;
     if (nvs_get_i32(h, "local", &v) == ESP_OK) s->local_only_mode = v != 0;
     if (nvs_get_i32(h, "ota_en", &v) == ESP_OK) s->ota_enabled = v != 0;
-    if (nvs_get_i32(h, "showcase", &v) == ESP_OK) s->contest_showcase_mode_enabled = v != 0;
     if (nvs_get_i32(h, "sym_en", &v) == ESP_OK) s->symbiont_mode_enabled = v != 0;
     if (nvs_get_i32(h, "sym_vent", &v) == ESP_OK) s->symbiont_ventilation_allowed = v != 0;
     if (nvs_get_i32(h, "sym_safe", &v) == ESP_OK) s->symbiont_safe_control_enabled = v != 0;
@@ -213,9 +213,6 @@ esp_err_t shu1_settings_store_save_settings(const shu1_settings_t *s) {
     if (err == ESP_OK) err = nvs_set_i32(h, "temp_min", s->tempering_duration_min);
     if (err == ESP_OK) err = nvs_set_i32(h, "auto_prof", s->auto_material_profile_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "mat_warn", s->material_mismatch_warning_enabled ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_i32(h, "antiwarp", s->anti_warp_enabled ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_i32(h, "largeprt", s->large_print_protection_enabled ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_i32(h, "night", s->safe_overnight_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "pause_en", s->pause_hold_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "pause_st", s->pause_hold_strategy);
     if (err == ESP_OK) err = nvs_set_i32(h, "pause_min", s->pause_hold_min);
@@ -249,14 +246,10 @@ esp_err_t shu1_settings_store_save_settings(const shu1_settings_t *s) {
     if (err == ESP_OK) err = nvs_set_i32(h, "wear_pct", s->heater_wear_warning_pct);
     if (err == ESP_OK) err = nvs_set_i32(h, "air_en", s->airflow_detection_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "pla_en", s->pla_protection_enabled ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_i32(h, "resume_en", s->smart_resume_enabled ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_i32(h, "resume_m", s->resume_recover_min);
     if (err == ESP_OK) err = nvs_set_i32(h, "pickup", s->post_print_pickup_mode);
     if (err == ESP_OK) err = nvs_set_i32(h, "pickup_m", s->pickup_keep_warm_min);
     if (err == ESP_OK) err = nvs_set_i32(h, "risk_en", s->print_risk_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "start_warn", s->start_print_warning_enabled ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_i32(h, "recipes", s->local_recipes_enabled ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_i32(h, "recipe", s->active_recipe_slot);
     if (err == ESP_OK) err = nvs_set_i32(h, "safety_en", s->safety_score_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "setup_wiz", s->first_setup_wizard_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "setup_step", s->first_setup_step);
@@ -272,7 +265,6 @@ esp_err_t shu1_settings_store_save_settings(const shu1_settings_t *s) {
     if (err == ESP_OK) err = nvs_set_i32(h, "lang", s->language_code);
     if (err == ESP_OK) err = nvs_set_i32(h, "local", s->local_only_mode ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "ota_en", s->ota_enabled ? 1 : 0);
-    if (err == ESP_OK) err = nvs_set_i32(h, "showcase", s->contest_showcase_mode_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "sym_en", s->symbiont_mode_enabled ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "sym_vent", s->symbiont_ventilation_allowed ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_i32(h, "sym_safe", s->symbiont_safe_control_enabled ? 1 : 0);
@@ -299,10 +291,30 @@ esp_err_t shu1_settings_store_load_device_config(shu1_device_config_t *cfg) {
     nvs_get_str(h, "ssid", cfg->wifi_ssid, &len);
     len = sizeof(cfg->wifi_password);
     nvs_get_str(h, "password", cfg->wifi_password, &len);
+    wifi_record_t wifi_record={0};size_t wifi_size=sizeof(wifi_record);
+    esp_err_t wifi_err=nvs_get_blob(h,"wifi_config",&wifi_record,&wifi_size);
+    if (wifi_err==ESP_OK && wifi_size==sizeof(wifi_record) && wifi_record.version==1 &&
+        memchr(wifi_record.ssid,0,sizeof(wifi_record.ssid)) && memchr(wifi_record.password,0,sizeof(wifi_record.password))) {
+        memcpy(cfg->wifi_ssid,wifi_record.ssid,sizeof(cfg->wifi_ssid));
+        memcpy(cfg->wifi_password,wifi_record.password,sizeof(cfg->wifi_password));
+    } else if (wifi_err!=ESP_ERR_NVS_NOT_FOUND) {
+        memset(cfg,0,sizeof(*cfg));nvs_close(h);return ESP_ERR_INVALID_STATE;
+    }
     len = sizeof(cfg->moonraker_host);
     nvs_get_str(h, "mk_host", cfg->moonraker_host, &len);
     uint16_t port = (uint16_t)cfg->moonraker_port;
     if (nvs_get_u16(h, "mk_port", &port) == ESP_OK) cfg->moonraker_port = port;
+    moonraker_record_t mr={0};size_t mr_size=sizeof(mr);
+    esp_err_t mr_err=nvs_get_blob(h,"mk_config",&mr,&mr_size);
+    if(mr_err==ESP_OK && mr_size==sizeof(mr) && mr.version==1 &&
+        memchr(mr.host,0,sizeof(mr.host)) && memchr(mr.key,0,sizeof(mr.key)) && mr.port>=1 && mr.port<=65535) {
+        snprintf(cfg->moonraker_host,sizeof(cfg->moonraker_host),"%s",mr.host);
+        cfg->moonraker_port=(int)mr.port;
+        snprintf(cfg->moonraker_api_key,sizeof(cfg->moonraker_api_key),"%s",mr.key);
+    } else if(mr_err!=ESP_ERR_NVS_NOT_FOUND) {
+        cfg->moonraker_host[0]=0;cfg->moonraker_api_key[0]=0;
+        nvs_close(h);return ESP_ERR_INVALID_STATE; // Never fall back to a different legacy printer on corrupt new config.
+    }
     nvs_close(h);
     return ESP_OK;
 }
@@ -312,13 +324,29 @@ esp_err_t shu1_settings_store_save_device_config(const shu1_device_config_t *cfg
     nvs_handle_t h;
     esp_err_t err = open_rw(&h);
     if (err != ESP_OK) return err;
-    if (err == ESP_OK) err = nvs_set_str(h, "ssid", cfg->wifi_ssid);
-    if (err == ESP_OK) err = nvs_set_str(h, "password", cfg->wifi_password);
-    if (err == ESP_OK) err = nvs_set_str(h, "mk_host", cfg->moonraker_host);
-    if (err == ESP_OK) err = nvs_set_u16(h, "mk_port", (uint16_t)cfg->moonraker_port);
+    wifi_record_t record={.version=1};
+    snprintf(record.ssid,sizeof(record.ssid),"%s",cfg->wifi_ssid);
+    snprintf(record.password,sizeof(record.password),"%s",cfg->wifi_password);
+    err=nvs_set_blob(h,"wifi_config",&record,sizeof(record));
+    memset(&record,0,sizeof(record));
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
-    if (err == ESP_OK) shu1_event_log_add("warn", "device_config_saved", "Wi-Fi/Moonraker config saved; reboot may be required");
+    if (err == ESP_OK) shu1_event_log_add("info", "device_config_saved", "Wi-Fi credentials saved as one NVS record");
+    return err;
+}
+
+esp_err_t shu1_settings_store_save_moonraker(const shu1_device_config_t *cfg) {
+    if(!cfg) return ESP_ERR_INVALID_ARG;
+    moonraker_record_t record={.version=1,.port=(uint32_t)cfg->moonraker_port};
+    snprintf(record.host,sizeof(record.host),"%s",cfg->moonraker_host);
+    snprintf(record.key,sizeof(record.key),"%s",cfg->moonraker_api_key);
+    nvs_handle_t h;esp_err_t err=open_rw(&h);
+    if(err==ESP_OK) {
+        err=nvs_set_blob(h,"mk_config",&record,sizeof(record));
+        if(err==ESP_OK) err=nvs_commit(h);
+        nvs_close(h);
+    }
+    memset(&record,0,sizeof(record));
     return err;
 }
 
@@ -342,12 +370,15 @@ static void reset_restart_task(void *arg) {
 esp_err_t shu1_settings_store_factory_reset(void) {
     SHU1_CONTROL_GUARD(guard);
     if (!shu1_control_maintenance_begin()) return ESP_ERR_INVALID_STATE;
+    shu1_control_guard_end(&guard); // Reservation stays active; safety loop must keep running.
     nvs_handle_t h;
     esp_err_t err = open_rw(&h);
     if (err == ESP_OK) {
         // Preserve fault_latch/fault_code, NTC calibration and REST credential.
         // Never erase the whole shared stock NVS partition or namespace.
         static const char *keys[] = {
+            "wifi_config",
+            "mk_config",
             "profile", "target", "filter", "hotbed", "ptc_cut", "dry_mode", "custom_t", "custom_h", "pre_t", "pre_min", "max_sess", "fan_post", "temp_en", "temp_end", "temp_min", "auto_prof", "mat_warn", "antiwarp", "largeprt", "night", "pause_en", "pause_st", "pause_min", "pause_low", "pause_by", "pause_stop", "dryout_t", "dryout_m", "sched_t", "sched_h", "finish", "keep_t", "keep_m", "door_en", "vdoor_en", "vdoor_win", "vdoor_drop", "vdoor_rate", "vdoor_min", "vdoor_act", "health_t", "health_s", "warm_pred", "soak_en", "soak_min", "soak_band", "stab_lock", "filt_en", "filt_h", "wear_en", "wear_pct", "air_en", "pla_en", "resume_en", "resume_m", "pickup", "pickup_m", "risk_en", "start_warn", "recipes", "recipe", "safety_en", "setup_wiz", "setup_step", "setup_done", "hist_en", "hist_sec", "inc_en", "out_latch", "out_arm", "h_verified", "f_verified", "noti_min", "lang", "local", "ota_en", "showcase", "sym_en", "sym_vent", "sym_safe", "sym_policy", "cool_rel_c", "ssid", "password", "mk_host", "mk_port"
         };
         for (size_t i = 0; err == ESP_OK && i < sizeof(keys) / sizeof(keys[0]); ++i) {

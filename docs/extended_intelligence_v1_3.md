@@ -1,5 +1,10 @@
 # SnapHeater U1 v1.3 Extended Intelligence Pack
 
+> 2026-09-06: Anti-Warp, Large Print Protection, Safe Overnight, recipes and
+> Showcase metadata and legacy Smart Resume have been retired. Their descriptions/payload examples below
+> are historical, not supported controls. See [Current implementation](CURRENT_IMPLEMENTATION.md)
+> and [pause/history update](LOCAL_HISTORY_PAUSE_UPDATE.md) for current behavior.
+
 This version adds the second feature pack requested for the SnapHeater U1 firmware. The goal is to turn the heater firmware into a chamber climate assistant for Snapmaker U1, not just an ON/OFF heater.
 
 ## Added modules
