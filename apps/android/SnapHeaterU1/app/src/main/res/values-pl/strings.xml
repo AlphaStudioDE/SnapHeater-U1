@@ -1,4 +1,5 @@
 <resources>
+    <string name="preview_history_note">Dane przykładowe · Nagrzewanie, utrzymanie i tempering. Nic nie jest zapisywane ani wysyłane do urządzenia.</string>
     <string name="persistence_unknown">Brak aktualnego potwierdzenia zapisu na Pandzie</string>
     <string name="persistence_failed">Nie zapisano ustawień na Pandzie. Ponowienie po ostygnięciu i zatrzymaniu.</string>
     <string name="persistence_pending">Ustawienia działają w RAM; zapis na Pandzie po ostygnięciu i zatrzymaniu.</string>

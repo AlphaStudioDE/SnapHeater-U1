@@ -149,8 +149,9 @@ class DailyUiTests(unittest.TestCase):
 
     def test_visual_preview_is_separate_from_device_transport(self):
         app = (UI / "SnapHeaterApp.kt").read_text(encoding="utf-8")
-        self.assertLess(app.index("if (visualPreview)"), app.index("val context ="))
-        branch = app.split("if (visualPreview)", 1)[1].split("val context =", 1)[0]
+        self.assertLess(app.index("if (visualPreview &&"), app.index("val context ="))
+        branch = app.split("if (visualPreview &&", 1)[1].split("val context =", 1)[0]
+        self.assertIn("BuildConfig.ENABLE_VISUAL_PREVIEW", branch)
         self.assertIn("return", branch)
         preview = (UI / "screens/VisualPreviewScreen.kt").read_text(encoding="utf-8")
         for forbidden in ("import com.alphastudio.snapheateru1.data",
@@ -160,6 +161,12 @@ class DailyUiTests(unittest.TestCase):
             self.assertNotIn(forbidden, preview)
         self.assertIn("visual_preview_notice", preview)
         self.assertIn("BackHandler", preview)
+        self.assertIn("AppTab.Dashboard, AppTab.Modes, AppTab.History, AppTab.Settings", preview)
+        self.assertIn("AppTab.History -> PreviewHistoryScreen()", preview)
+        history_preview = (UI / "screens/PreviewHistoryScreen.kt").read_text(encoding="utf-8")
+        for forbidden in ("TemperatureHistory(", "EventHistory(", "LaunchedEffect", "CreateDocument", "Repository"):
+            self.assertNotIn(forbidden, history_preview)
+        self.assertIn("if (onPreview != null)", (UI / "screens/ConnectScreen.kt").read_text(encoding="utf-8"))
 
     def test_each_mode_has_a_shared_vector_icon(self):
         icons = (UI / "components/ActionIcons.kt").read_text(encoding="utf-8")

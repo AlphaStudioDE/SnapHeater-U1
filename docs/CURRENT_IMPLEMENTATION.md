@@ -31,7 +31,7 @@ AUTHORS.md and THIRD_PARTY_NOTICES.md; no upstream approval is implied.
   transports do not substitute a newer revision after an intervening OFF.
   The UI distinguishes RAM-active/pending settings, confirmed persistence,
   persistence failure and unavailable persistence status.
-- Firmware 0.9.9 and Android 0.9.9 (version code 3) identify this change set.
+- Firmware 0.9.9 and Android 0.9.9 (version code 4) identify this change set.
   ESP-IDF 5.3.5 and WebSocket client 1.7.0 are pinned with a dependency lock.
   See [build provenance](BUILD_PROVENANCE.md); pinning is not a claim of a
   bit-for-bit reproducible release or hardware qualification.
@@ -42,7 +42,8 @@ AUTHORS.md and THIRD_PARTY_NOTICES.md; no upstream approval is implied.
   explicit safe fault clear after reboot. See the I/O document for limitations.
 
 - Localized Android controls, per-mode icons, saved heaters and editable names.
-- Separate visual preview without physical transport/control.
+- Local-only developer visual preview without physical transport/control,
+  including synthetic History. Public APKs have no preview option.
 - BLE Wi-Fi provisioning with scan, connection deadline and explicit errors.
 - Phone-assisted printer discovery; Panda executes its own Moonraker client.
 - Optional Moonraker API key and tested configuration changes without reboot.

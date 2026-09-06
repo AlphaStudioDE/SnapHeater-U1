@@ -41,10 +41,12 @@ testing companion. The ZIP combines both with instructions and checksums.
 
 Public numbering restarts at **0.9.9** for the first packaged prerelease;
 historical 1.x source labels do not denote a later stable release.
-Android version code is **3**, version name **0.9.9**.
+Android version code is **4**, version name **0.9.9**. The corrected public APK
+removes the disconnected-device preview option; preview is a local-only developer
+build. APK/ZIP/checksums were refreshed; firmware 0.9.9 is unchanged.
 
 Offline verification: 107 Python tests (including 62 control-loop scenarios),
-24 Android unit tests, the real-mutex OFF/maintenance safety test and ESP32-C3
+25 Android unit tests, the real-mutex OFF/maintenance safety test and ESP32-C3
 build. These are software checks, not electrical or end-to-end device qualification.
 
 ## A community-powered revival

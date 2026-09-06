@@ -50,6 +50,8 @@ at **55 °C**; reaching that target depends on the enclosure and environment.
 
 Android uses BLE and authenticated LAN REST. OTA uses LAN REST, not BLE.
 The companion APK is a sideloadable **debug/testing build**, not a Play Store release.
+The public APK has **no disconnected-device preview option**. Screenshot preview
+is available only in an explicitly opted-in local developer build, not release assets.
 English, Polish and German resources are included. iOS is not shipped.
 
 ## Integration that lives on Panda

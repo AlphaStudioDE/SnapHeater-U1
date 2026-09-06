@@ -94,7 +94,8 @@ adb install -r SnapHeater-U1-Android-0.9.9-debug.apk
 
 A signing-key mismatch can prevent in-place updates. **Do not uninstall blindly**:
 uninstalling removes local history and settings. Export data first and report the
-mismatch. Version code 3 permits an upgrade from the earlier test app (code 2).
+mismatch. Version code 4 permits an upgrade from the earlier test apps (codes 2/3).
+The public APK has no disconnected-device preview option.
 
 ## First supervised session and recovery
 

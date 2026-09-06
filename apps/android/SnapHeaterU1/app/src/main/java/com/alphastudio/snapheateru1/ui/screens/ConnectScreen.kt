@@ -58,7 +58,7 @@ fun ConnectScreen(
     savedDeviceNames: Map<String, String>,
     onRenameDevice: (String, String) -> Unit,
     onSavedDevice: (String) -> Unit,
-    onPreview: () -> Unit,
+    onPreview: (() -> Unit)?,
     deviceAddress: String,
     restToken: String,
     onRestToken: (String) -> Unit,
@@ -136,7 +136,7 @@ fun ConnectScreen(
         }
         Text(stringResource(R.string.wizard_snapheater), style = MaterialTheme.typography.titleLarge)
         LanguagePicker()
-        OutlinedButton(
+        if (onPreview != null) OutlinedButton(
             onClick = onPreview,
             enabled = !isConnecting && !isScanning,
             modifier = Modifier.fillMaxWidth(),

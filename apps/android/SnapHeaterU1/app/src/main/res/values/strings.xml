@@ -1,4 +1,5 @@
 <resources>
+    <string name="preview_history_note">Sample data only · Preheat, hold and tempering. Nothing is recorded or sent to a device.</string>
     <string name="persistence_unknown">Device storage status unavailable</string>
     <string name="persistence_failed">Settings not saved on Panda. Automatic retry when cold and idle.</string>
     <string name="persistence_pending">Settings active in RAM; saving on Panda after cooling and stopping.</string>

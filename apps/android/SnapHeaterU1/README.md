@@ -28,3 +28,8 @@ See [installation](../../../docs/INSTALL_0.9.9.md) and
 
 The visual preview is isolated from physical transports. Preview screens are
 not evidence of a real connected heater or successful hardware tests.
+Public builds default to `ENABLE_VISUAL_PREVIEW=false`: no preview button or entry.
+For private screenshots only, build with `-PlocalPreview=true`; the app identifies
+itself as `0.9.9-preview`. Never upload that APK to GitHub releases.
+The local preview includes a synthetic History chart and timestamped events,
+with no database writes, transport or enabled export actions.

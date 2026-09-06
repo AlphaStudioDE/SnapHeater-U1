@@ -146,7 +146,7 @@ fun HistoryScreen(history: TemperatureHistory, snapshot: HeaterSnapshot, recordi
 }
 
 @Composable
-private fun TemperatureChart(points: List<TemperaturePoint>, gaps: List<HistoryGap>) {
+internal fun TemperatureChart(points: List<TemperaturePoint>, gaps: List<HistoryGap>) {
     val colors=listOf(Color(0xFF35B6F2),Color(0xFFFFA144),Color(0xFF76CE9B))
     val temperatures=points.flatMap {listOfNotNull(it.chamber,it.ptc,it.target)}
     val maximum = maxOf(60.0, (temperatures.maxOrNull() ?: 55.0)+5).toFloat()

@@ -53,7 +53,7 @@ fun VisualPreviewScreen(onExit: () -> Unit) {
         },
         bottomBar = {
             NavigationBar {
-                listOf(AppTab.Dashboard, AppTab.Modes, AppTab.Settings).forEach { item ->
+                listOf(AppTab.Dashboard, AppTab.Modes, AppTab.History, AppTab.Settings).forEach { item ->
                     NavigationBarItem(
                         selected = tab == item || (item == AppTab.Settings &&
                             tab in listOf(AppTab.Diagnostics, AppTab.Safety)),
@@ -78,7 +78,7 @@ fun VisualPreviewScreen(onExit: () -> Unit) {
                     })
                 AppTab.Safety -> SafetyScreen(sample, onApplySafety = { _, _, _ -> })
                 AppTab.Diagnostics -> DiagnosticsScreen(sample)
-                AppTab.History -> ScreenColumn { Text(previewNote) }
+                AppTab.History -> PreviewHistoryScreen()
                 AppTab.Settings -> ScreenColumn {
                     Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium)
                     LanguagePicker()

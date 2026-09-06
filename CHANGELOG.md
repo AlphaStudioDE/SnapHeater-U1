@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.9 Android correction — version code 4
+
+- Public APK: removed disconnected-device preview entry and gated restored state.
+- Local-only `-PlocalPreview=true` build: synthetic History chart and events for
+  screenshots, isolated from storage/transports; labeled `0.9.9-preview`.
+- Added history data/range tests. Firmware binary remains unchanged.
+
 ## 0.9.9 — packaged testing prerelease
 
 - New public numbering: firmware/app 0.9.9, Android version code 3.

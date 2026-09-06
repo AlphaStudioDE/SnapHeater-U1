@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--build', type=Path, required=True)
     parser.add_argument('--apk', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--aapt', type=Path, required=True)
     args = parser.parse_args()
     version = re.search(r'#define SHU1_FW_VERSION\s+"([^"]+)"', (ROOT/'main/app_config.h').read_text()).group(1)
     assert version == '0.9.9', 'Review package naming/policy for each release'
@@ -51,6 +52,8 @@ def main():
     assert not provenance['source_dirty'], 'Commit reviewed sources before packaging'
     assert provenance['artifacts']['SnapHeater_U1.bin']['sha256'] == digest(image)
     assert provenance['artifacts']['app-debug.apk']['sha256'] == digest(args.apk)
+    badging = subprocess.check_output([str(args.aapt), 'dump', 'badging', str(args.apk)], text=True)
+    assert "versionName='0.9.9'" in badging and "versionCode='4'" in badging, 'Never package a local preview APK'
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)  # Never overwrite an existing release.
     bin_name = f'SnapHeater-U1-{version}-ota.bin'
@@ -69,10 +72,11 @@ def main():
     }
     for name, source in documents.items():
         text = (ROOT/source).read_text(encoding='utf-8')
-        (out/name).write_text(public_links(text, Path(source).parent, tag), encoding='utf-8')
+        (out/name).write_text(public_links(text, Path(source).parent, provenance['git_revision']), encoding='utf-8')
     provenance.update({
         'release_tag': tag, 'status': 'experimental-prerelease',
-        'android_version': version, 'android_version_code': 3,
+        'android_version': version, 'android_version_code': 4,
+        'visual_preview_available': False,
         'android_build_type': 'debug/testing; not production-signed',
         'installation': 'app-only OTA; never flash application at 0x0',
         'artifact_files': {p.name: {'sha256': digest(p), 'bytes': p.stat().st_size}

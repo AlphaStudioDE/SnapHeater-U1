@@ -83,7 +83,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SnapHeaterApp(notificationDevice: String="", onNotificationHandled: () -> Unit = {}) {
     var visualPreview by rememberSaveable { mutableStateOf(false) }
-    if (visualPreview) {
+    if (visualPreview && com.alphastudio.snapheateru1.BuildConfig.ENABLE_VISUAL_PREVIEW) {
         com.alphastudio.snapheateru1.ui.screens.VisualPreviewScreen(onExit = { visualPreview = false })
         return // No repository, scan or polling effect exists in this branch.
     }
@@ -467,7 +467,8 @@ fun SnapHeaterApp(notificationDevice: String="", onNotificationHandled: () -> Un
                     savedNamesRevision++
                 },
                 onSavedDevice = { connectSavedDevice(it) },
-                onPreview = { visualPreview = true },
+                onPreview = if (com.alphastudio.snapheateru1.BuildConfig.ENABLE_VISUAL_PREVIEW)
+                    ({ visualPreview = true }) else null,
                 deviceAddress = deviceAddress,
                 restToken = restToken,
                 onRestToken = { restToken = it.take(64) },

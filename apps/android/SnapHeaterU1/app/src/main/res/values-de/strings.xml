@@ -1,4 +1,5 @@
 <resources>
+    <string name="preview_history_note">Nur Beispieldaten · Vorheizen, Halten und Tempering. Nichts wird gespeichert oder an ein Gerät gesendet.</string>
     <string name="persistence_unknown">Speicherstatus der Panda nicht verfügbar</string>
     <string name="persistence_failed">Einstellungen nicht gespeichert. Neuer Versuch nach Abkühlung und Stopp.</string>
     <string name="persistence_pending">Einstellungen im RAM aktiv; Speicherung nach Abkühlung und Stopp.</string>
