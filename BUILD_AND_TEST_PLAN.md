@@ -5,8 +5,9 @@ This source update is not a hardware-qualified binary release.
 
 ## Build and offline verification
 
-Use ESP-IDF 5.3.5 and the repository defaults. Normal heater and fan control are
-disabled by default. See [offline testing](docs/TESTING.md) for both compile
+Use ESP-IDF 5.3.5. Repository defaults now enable the experimental functional
+tester hardware path; see [tester build instructions](docs/TESTER_BUILD.md).
+See [offline testing](docs/TESTING.md) for both compile
 configurations and the regression suite.
 
 Do not flash the heater-enabled compile-test configuration merely because its

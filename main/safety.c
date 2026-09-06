@@ -122,11 +122,9 @@ static void start_tempering_if_user_enabled(shu1_settings_t *s, const shu1_runti
     if (s->tempering_phase == SHU1_TEMPERING_ACTIVE) return;
     if (!g_auto_print_context_seen) return;
 
-    int start_temp = s->target_temp_c;
-    if (isfinite(rt->chamber_temp_c) && rt->chamber_temp_c > (float)start_temp) {
-        start_temp = (int)ceilf(rt->chamber_temp_c);
-    }
-    start_temp = clamp_target(start_temp);
+    // The ramp starts at the selected AUTO target, never at a sensor overshoot.
+    (void)rt;
+    int start_temp = clamp_target(s->target_temp_c);
     int end_temp = s->tempering_end_temp_c;
     // Android may set end_temp=0 to mean "ramp to heater-off". This is the
     // default for v0.9.0 because the user chooses duration, not a hidden final hold.
@@ -309,28 +307,15 @@ static void update_auto_context(shu1_settings_t *s, const shu1_printer_state_t *
 }
 
 
-static bool virtual_door_context_active(const shu1_settings_t *s, const shu1_printer_state_t *p, int64_t now_ms) {
-    // Software-only opening detection is only meaningful after a print or during post-print conditioning.
-    // It deliberately does not run during active printing, preheat or drying.
-    if (s->tempering_phase == SHU1_TEMPERING_ACTIVE) return true;
-    if (s->keep_warm_active) return true;
-    if (s->work_mode == SHU1_MODE_AUTO && printer_data_fresh(p, now_ms) && printer_state_is_complete_or_idle(p)) return true;
-    return false;
-}
-
 static void reset_virtual_door_window(shu1_settings_t *s, const shu1_runtime_t *rt, int64_t now_ms) {
     s->virtual_door_window_start_ms = now_ms;
     s->virtual_door_window_start_temp_c = rt->chamber_temp_c;
-    s->virtual_door_last_drop_c = 0.0f;
-    s->virtual_door_last_rate_c_per_min = 0.0f;
 }
 
 static bool update_virtual_door_detection(shu1_settings_t *s, const shu1_runtime_t *rt, const shu1_printer_state_t *p, int64_t now_ms) {
+    (void)p; // Advisory in every mode, independent of printer/phone connectivity.
+    s->virtual_door_action = SHU1_VDOOR_ACTION_NOTIFY_ONLY;
     if (!s->virtual_door_detection_enabled) {
-        s->virtual_door_window_start_ms = 0;
-        return false;
-    }
-    if (!virtual_door_context_active(s, p, now_ms)) {
         s->virtual_door_window_start_ms = 0;
         return false;
     }
@@ -377,8 +362,6 @@ static bool update_virtual_door_detection(shu1_settings_t *s, const shu1_runtime
     float rate = drop * 60000.0f / (float)elapsed_ms;
     if (drop < 0) drop = 0;
     if (rate < 0) rate = 0;
-    s->virtual_door_last_drop_c = drop;
-    s->virtual_door_last_rate_c_per_min = rate;
 
     bool enough_temp_to_mean_something = start_temp >= (float)min_base;
     bool probable_open = enough_temp_to_mean_something && drop >= (float)drop_c && rate >= (float)rate_cpm;
@@ -390,19 +373,10 @@ static bool update_virtual_door_detection(shu1_settings_t *s, const shu1_runtime
     }
 
     s->virtual_door_open = true;
+    s->virtual_door_last_drop_c = drop;
+    s->virtual_door_last_rate_c_per_min = rate;
     s->virtual_door_open_pending = true;
     s->virtual_door_detected_ms = now_ms;
-    s->door_open = true;
-    s->door_open_pending = true;
-
-    if (s->virtual_door_action == SHU1_VDOOR_ACTION_STOP_CONDITIONING || s->virtual_door_action == SHU1_VDOOR_ACTION_STOP_HEATER) {
-        s->tempering_phase = SHU1_TEMPERING_IDLE;
-        s->tempering_start_ms = 0;
-        s->tempering_end_ms = 0;
-        s->tempering_current_target_c = 0;
-        s->keep_warm_active = false;
-        s->work_on = false;
-    }
 
     ESP_LOGW(TAG, "virtual chamber open detected: drop=%.1fC rate=%.1fC/min window=%ds", drop, rate, window_sec);
     shu1_event_log_add("warn", "virtual_chamber_open", "probable chamber/top-cover opening detected from sudden temperature drop");
@@ -999,11 +973,17 @@ static void update_v14_setup_and_latch(shu1_settings_t *st, shu1_runtime_t *rt, 
         CONFIG_SHU1_ZERO_CROSS_GPIO == 7 &&
         rt->zero_cross_signal_present;
     bool runtime_gate_ready = sensors_ready && heater_map_ready && fan_map_ready &&
-        st->sensors_verified && st->heater_output_verified && st->fan_output_verified;
+        isfinite(rt->chamber_instant_temp_c) && isfinite(rt->ptc_instant_temp_c) &&
+        shu1_control_start_allowed();
+
+    // Legacy "armed" is now session intent, not a second user action. Never
+    // synthesize hardware-verification flags from software observations.
+    st->output_safety_latch_enabled = true;
+    st->output_safety_latch_armed = st->work_on && shu1_control_start_allowed();
 
     // Live plausibility and a matching build never constitute physical verification.
-    // These three flags must be recorded explicitly after supervised continuity,
-    // sensor and airflow checks; the heater pin remains inferred upstream.
+    // Legacy verification flags remain records only, not a daily activation
+    // ritual. They are never inferred from runtime readiness.
     st->moonraker_verified = (pr->moonraker_connected && pr->klippy_ready) || st->moonraker_verified;
     if (st->first_setup_wizard_enabled && !st->first_setup_complete) {
         int step = SHU1_SETUP_STEP_BLE_CONNECTED;
@@ -1011,17 +991,17 @@ static void update_v14_setup_and_latch(shu1_settings_t *st, shu1_runtime_t *rt, 
         if (st->sensors_verified) step = SHU1_SETUP_STEP_SENSORS_OK;
         if (st->fan_output_verified) step = SHU1_SETUP_STEP_FAN_VERIFIED;
         if (st->heater_output_verified) step = SHU1_SETUP_STEP_HEATER_VERIFIED;
-        if (runtime_gate_ready && (st->local_only_mode || st->moonraker_verified)) {
+        if (runtime_gate_ready && st->sensors_verified && st->fan_output_verified &&
+            st->heater_output_verified && (st->local_only_mode || st->moonraker_verified)) {
             step = SHU1_SETUP_STEP_COMPLETE;
             st->first_setup_complete = true;
             st->setup_warning_pending = false;
         }
         st->first_setup_step = step;
     }
-    // Readiness never arms the latch automatically. A boot, reconnect or recovered
-    // zero-cross signal must still be followed by an explicit user/app arm action.
-    rt->output_safety_latch_ready = !st->output_safety_latch_enabled ||
-                                    (st->output_safety_latch_armed && runtime_gate_ready);
+    // Only an admitted work request can create a session. Fault handling stops
+    // that request, so recovered ZC/reconnect cannot create a new session.
+    rt->output_safety_latch_ready = st->output_safety_latch_armed && runtime_gate_ready;
     if (st->output_safety_latch_enabled && !rt->output_safety_latch_ready && st->work_on) {
         rt->notification_level = SHU1_NOTIFY_ACTION;
         snprintf(rt->notification_code, sizeof(rt->notification_code), "%s", "output_latch_not_ready");
@@ -1126,11 +1106,19 @@ static void control_task(void *arg) {
         shu1_printer_state_t pr = shu1_state_get_printer();
         shu1_control_snapshot_t ctl_snapshot;
         shu1_control_snapshot(&ctl_snapshot);
-        const bool remote_lease_expired = (st.work_on || st.scheduled_preheat_enabled) && ctl_snapshot.lease_active &&
-                                          shu1_control_lease_expired();
-        if (remote_lease_expired) {
-            shu1_settings_stop(&st);
-            shu1_control_release_any();
+        if (ctl_snapshot.lease_active && shu1_control_lease_expired()) {
+            // The phone owns command access, not task execution. Invalidate its
+            // expired token while retaining the accepted local job and deadlines.
+            // The policy guard serializes this handoff with OFF and new commands.
+            if (st.work_on || st.scheduled_preheat_enabled) {
+                if (shu1_control_claim(SHU1_CONTROL_LOCAL_JOB, true, ctl_snapshot.revision, NULL) != SHU1_CONTROL_OK) {
+                    shu1_settings_stop(&st);
+                    shu1_safety_latch_inhibit();
+                }
+            } else {
+                shu1_control_release_any();
+            }
+            shu1_control_snapshot(&ctl_snapshot);
         }
         (void)shu1_safety_latch_retry_persist();
 
@@ -1160,11 +1148,9 @@ static void control_task(void *arg) {
         bool health_done_now = health_test_update(&st, &rt, now_ms);
         update_auto_context(&st, &pr, &rt, now_ms);
         update_tempering(&st, now_ms);
-        bool virtual_door_detected_now = update_virtual_door_detection(&st, &rt, &pr, now_ms);
+        (void)update_virtual_door_detection(&st, &rt, &pr, now_ms);
 
-        if (virtual_door_detected_now) {
-            rt.heater_fault = SHU1_HEATER_DOOR_OPEN;
-        } else if (dryout_completed_now) {
+        if (dryout_completed_now) {
             rt.heater_fault = SHU1_HEATER_DRYOUT_COMPLETE;
         } else if (health_done_now) {
             rt.heater_fault = st.health_test_result == SHU1_HEALTH_RESULT_OK ? SHU1_HEATER_HEALTH_TEST_COMPLETE : SHU1_HEATER_HEALTH_TEST_FAILED;
@@ -1311,7 +1297,6 @@ static void control_task(void *arg) {
         // target is not expected to keep increasing temperature.
         update_rise_detector(&rt, pid_active && rt.heater_commanded_duty > 0.0f &&
             (float)target - rt.chamber_instant_temp_c > 2.0f, now_ms);
-        if (remote_lease_expired) rt.heater_fault = SHU1_HEATER_LINK_LOST;
         if (rt.heater_fault != SHU1_HEATER_OK) request_heat = false;
 
         const bool persistent_hazard =

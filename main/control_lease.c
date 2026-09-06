@@ -141,6 +141,7 @@ const char *shu1_control_source_str(shu1_control_source_t source) {
         case SHU1_CONTROL_REST: return "rest";
         case SHU1_CONTROL_BLE: return "ble";
         case SHU1_CONTROL_PHYSICAL: return "physical";
+        case SHU1_CONTROL_LOCAL_JOB: return "local_job";
         default: return "none";
     }
 }

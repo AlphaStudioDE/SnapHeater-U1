@@ -18,9 +18,19 @@ class FirmwareSnapHeaterRepository(
     private var revision: Long = -1
 
     override fun snapshot(): HeaterSnapshot {
-        if (leaseId.isNotBlank()) client.heartbeat(leaseId)
+        if (leaseId.isNotBlank()) {
+            // A locally running job can outlive this phone's command lease.
+            // Recover via read-only status; never retry an energy command.
+            runCatching { client.heartbeat(leaseId) }.onFailure { leaseId = "" }
+        }
         return rememberControl(client.status().toHeaterSnapshot())
     }
+
+    override fun acknowledgeVirtualDoor(detectedMs: Long): HeaterSnapshot =
+        rememberControl(client.postSettings(JSONObject().put("virtual_door_ack", detectedMs)).toHeaterSnapshot())
+
+    override fun setVirtualDoorDetection(enabled: Boolean): HeaterSnapshot =
+        command(JSONObject().put("virtual_door_detection_enabled", enabled).put("takeover", true))
 
     private fun command(payload: JSONObject): HeaterSnapshot {
         if (leaseId.isNotBlank()) payload.put("lease_id", leaseId)
@@ -38,25 +48,19 @@ class FirmwareSnapHeaterRepository(
         return value
     }
 
-    override fun setMode(mode: AppMode): HeaterSnapshot {
-        val payload = if (mode == AppMode.SafeStop) {
-            safeStopPayload()
-        } else {
-            JSONObject()
-                .put("work_mode", mode.toFirmwareWorkMode())
-                .put("work_on", true)
-                .put("takeover", true)
-        }
-        return command(payload)
-    }
+    override fun setMode(mode: AppMode): HeaterSnapshot = applySettings(snapshot().copy(mode = mode))
 
     override fun setTarget(targetC: Int): HeaterSnapshot {
         return command(JSONObject().put("set_temp", targetC).put("takeover", true))
     }
 
-    override fun applySettings(snapshot: HeaterSnapshot): HeaterSnapshot {
-        return command(snapshot.toSettingsPayload().put("takeover", true))
-    }
+    override fun configurePrinter(host: String, port: Int, ssid: String, password: String): HeaterSnapshot =
+        command(printerConfiguration(host, port, ssid, password))
+
+    override fun applySettings(snapshot: HeaterSnapshot): HeaterSnapshot = command(snapshot.jobPayload())
+
+    override fun savePreferences(snapshot: HeaterSnapshot): HeaterSnapshot = command(snapshot.preferencesPayload().put("takeover", true))
+    override fun schedulePreheat(snapshot: HeaterSnapshot): HeaterSnapshot = command(snapshot.schedulePayload())
 
     override fun applySafety(snapshot: HeaterSnapshot, armLatch: Boolean, disarmLatch: Boolean): HeaterSnapshot {
         val payload = JSONObject()
@@ -72,76 +76,10 @@ class FirmwareSnapHeaterRepository(
 
     fun checkHealth(): HeaterSnapshot {
         client.health()
+        client.verifyAccess() // Authenticated, read-only: status alone does not prove control access.
         return snapshot()
     }
 }
-
-private fun HeaterSnapshot.toSettingsPayload(): JSONObject {
-    val payload = JSONObject()
-        .put("work_mode", mode.toFirmwareWorkMode())
-        .put("set_temp", targetC)
-        .put("auto_material_profile_enabled", autoMaterialProfileEnabled)
-        .put("material_mismatch_warning_enabled", mismatchWarningEnabled)
-        .put("pla_protection_enabled", plaProtectionEnabled)
-        .put("anti_warp_enabled", antiWarpEnabled)
-        .put("large_print_protection_enabled", largePrintProtectionEnabled)
-        .put("safe_overnight_enabled", safeOvernightEnabled)
-        .put("pause_hold_enabled", pauseHoldEnabled)
-        .put("smart_resume_enabled", smartResumeEnabled)
-        .put("start_print_warning_enabled", startPrintWarningEnabled)
-        .put("airflow_detection_enabled", airflowDetectionEnabled)
-        .put("temp_history_enabled", tempHistoryEnabled)
-        .put("incident_report_enabled", incidentReportEnabled)
-        .put("local_recipes_enabled", localRecipesEnabled)
-        .put("scheduled_preheat_enabled", scheduledPreheatEnabled)
-        .put("local_only_mode", localOnlyMode)
-        .put("contest_showcase_mode_enabled", showcaseModeEnabled)
-        .put("symbiont_mode_enabled", symbiontModeEnabled)
-        .put("symbiont_ventilation_allowed", symbiontVentilationAllowed)
-
-    when (mode) {
-        AppMode.AutoStandby -> payload.put("work_on", true)
-        AppMode.ManualHold -> payload.put("work_on", true)
-        AppMode.Preheat -> {
-            payload
-                .put("work_on", true)
-                .put("preheat_running", true)
-                .put("preheat_target", targetC)
-                .put("preheat_hold_min", preheatHeatSoakMin)
-        }
-        AppMode.Drying -> {
-            payload
-                .put("work_on", true)
-                .put("isrunning", true)
-                .put("custom_temp", targetC)
-                .put("custom_timer", ceil(dryingTimeMin / 60.0).toInt().coerceAtLeast(1))
-        }
-        AppMode.Tempering -> {
-            payload
-                .put("work_on", true)
-                .put("tempering_enabled", true)
-                .put("tempering_end_temp", targetC)
-                .put("tempering_duration_min", temperingDurationMin)
-        }
-        AppMode.SafeStop -> {
-            return safeStopPayload()
-        }
-    }
-
-    return payload
-}
-
-private fun safeStopPayload(): JSONObject =
-    JSONObject()
-        .put("safe_stop", true)
-        .put("work_on", false)
-        .put("preheat_running", false)
-        .put("isrunning", false)
-        .put("dryout_running", false)
-        .put("health_test_running", false)
-        .put("tempering_enabled", false)
-        .put("cancel_tempering", true)
-        .put("disarm_output_safety_latch", true)
 
 private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
     val settings = optJSONObject("settings") ?: JSONObject()
@@ -151,10 +89,13 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
     val control = optJSONObject("control") ?: JSONObject()
 
     val mode = firmwareModeToAppMode(
+        workOn = if (settings.has("work_on")) settings.optBoolean("work_on") else null,
         workMode = settings.optInt("work_mode", 1),
         preheatRunning = settings.optBoolean("preheat_running", false),
         dryingRunning = settings.optBoolean("isrunning", false),
         temperingPhase = settings.optInt("tempering_phase", 0),
+        temperingEnabled = settings.optBoolean("tempering_enabled", false),
+        finishConditioningMode = settings.optInt("finish_conditioning_mode", 1),
     )
     val material = settings.optString("material_profile_name", "Custom").ifBlank { "Custom" }
     val connected = printer.optBoolean("moonraker_connected", false)
@@ -179,6 +120,9 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         gpioProbeLocked = !optBoolean("gpio_probe_build_enabled", false),
         fanOn = runtime.optBoolean("fan_output_on", false),
         moonraker = if (connected) "Connected / ${if (klippyReady) "ready" else "waiting"}" else "Read-only / waiting",
+        printerDataReady = printer.optBoolean("data_ready", false),
+        deviceId = optString("device_id", ""),
+        wifi = wifiSetupStatus(),
         ble = "LAN connected",
         material = material,
         printerState = printer.optString("normalized_state", "standby").ifBlank { "standby" },
@@ -201,6 +145,8 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         virtualDoorDetectionEnabled = settings.optBoolean("virtual_door_detection_enabled", true),
         virtualDoorOpen = settings.optBoolean("virtual_door_open", false),
         virtualDoorPending = settings.optBoolean("virtual_door_open_pending", false),
+        virtualDoorDetectedMs = settings.optLong("virtual_door_detected_ms", 0),
+        virtualDoorDropC = settings.optDouble("virtual_door_last_drop_c", 0.0),
         autoMaterialProfileEnabled = settings.optBoolean("auto_material_profile_enabled", true),
         mismatchWarningEnabled = settings.optBoolean("material_mismatch_warning_enabled", true),
         plaProtectionEnabled = settings.optBoolean("pla_protection_enabled", true),
@@ -253,5 +199,5 @@ private fun JSONObject.toHeaterSnapshot(): HeaterSnapshot {
         controlStateRevision = control.optLong("state_revision", 0L),
         controlLeaseId = optString("lease_id", ""),
         controlLeaseRemainingMs = control.optLong("lease_remaining_ms", 0L),
-    )
+    ).withPreferences(settings)
 }

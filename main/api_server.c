@@ -11,6 +11,7 @@
 #include "profiles.h"
 #include "settings_store.h"
 #include "command_validation.h"
+#include "job_commands.h"
 #include "event_log.h"
 #include "heater.h"
 #include "safety_latch.h"
@@ -22,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_timer.h"
+#include "wifi_sta.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
@@ -169,6 +171,7 @@ static cJSON *state_to_json(void) {
     shu1_state_t st;
     shu1_state_get(&st);
     cJSON *root = cJSON_CreateObject();
+    if (root) shu1_wifi_status_json(root);
     cJSON_AddStringToObject(root, "fw_name", SHU1_FW_NAME);
     cJSON_AddStringToObject(root, "fw_version", SHU1_FW_VERSION);
     cJSON_AddBoolToObject(root, "heater_output_build_enabled", CONFIG_SHU1_ENABLE_HEATER_OUTPUT);
@@ -436,6 +439,12 @@ static cJSON *state_to_json(void) {
 
     cJSON *printer = cJSON_AddObjectToObject(root, "printer");
     cJSON_AddBoolToObject(printer, "moonraker_connected", st.printer.moonraker_connected);
+    char device_id[13];
+    shu1_device_id(device_id, sizeof(device_id));
+    cJSON_AddStringToObject(root, "device_id", device_id);
+    cJSON_AddBoolToObject(printer, "data_ready", !shu1_device_config_restart_required() && st.printer.moonraker_connected &&
+        st.printer.klippy_ready && st.printer.subscribed && st.printer.last_update_ms > 0 &&
+        now_ms >= st.printer.last_update_ms && now_ms - st.printer.last_update_ms <= SHU1_PRINTER_STALE_MS);
     cJSON_AddStringToObject(printer, "webhooks_state", st.printer.webhooks_state);
     cJSON_AddBoolToObject(printer, "klippy_ready", st.printer.klippy_ready);
     cJSON_AddBoolToObject(printer, "subscribed", st.printer.subscribed);
@@ -610,6 +619,17 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
 
     SHU1_CONTROL_GUARD(policy_guard);
     cJSON *factory_reset = cJSON_GetObjectItem(root, "factory_reset");
+    cJSON *receipt = cJSON_GetObjectItemCaseSensitive(root, "virtual_door_ack");
+    if (receipt && root->child == receipt && !receipt->next && cJSON_IsNumber(receipt) &&
+        receipt->valuedouble > 0 && receipt->valuedouble < 9007199254740992.0) {
+        shu1_virtual_door_ack((int64_t)receipt->valuedouble);
+        cJSON_Delete(root);
+        cJSON *reply = state_to_json();
+        char *text = cJSON_PrintUnformatted(reply);
+        httpd_resp_sendstr(req, text ? text : "{}");
+        cJSON_free(text); cJSON_Delete(reply);
+        return ESP_OK;
+    }
     if (factory_reset) {
         shu1_control_snapshot_t current;
         shu1_control_snapshot(&current);
@@ -630,11 +650,20 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
     shu1_settings_t st = shu1_state_get_settings();
     const bool was_work_on = st.work_on;
     const bool stopping = cJSON_IsTrue(cJSON_GetObjectItem(root, "safe_stop")) ||
+        cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch")) ||
         cJSON_IsTrue(cJSON_GetObjectItem(root, "emergency_stop")) ||
         cJSON_IsFalse(cJSON_GetObjectItem(root, "work_on"));
     cJSON *chamber_offset = cJSON_GetObjectItem(root, "warehouse_temp_offset");
     cJSON *ptc_offset = cJSON_GetObjectItem(root, "ptc_temp_offset");
     const bool calibration = chamber_offset || ptc_offset;
+    if (!stopping && shu1_control_maintenance_active() &&
+        (cJSON_GetObjectItem(root, "wifi_ssid") || cJSON_GetObjectItem(root, "wifi_password") ||
+         cJSON_GetObjectItem(root, "moonraker_host") || cJSON_GetObjectItem(root, "moonraker_port"))) {
+        cJSON_Delete(root);
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"ok\":false,\"error\":\"network_setup_busy\"}");
+        return ESP_OK;
+    }
     if ((!stopping && shu1_control_maintenance_active()) ||
         (!stopping && calibration && (st.work_on || st.scheduled_preheat_enabled ||
             shu1_control_outputs_busy() ||
@@ -703,6 +732,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
     bool emergency_stop = cJSON_IsTrue(cJSON_GetObjectItem(root, "emergency_stop"));
     if (emergency_stop) shu1_safety_latch_trip_volatile(SHU1_HEATER_PANIC_OFF);
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "safe_stop")) ||
+        cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch")) ||
         cJSON_IsFalse(cJSON_GetObjectItem(root, "work_on")) || emergency_stop) {
         shu1_control_release_any();
         apply_safe_stop(&st);
@@ -736,6 +766,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
         shu1_event_log_add("info", "profile_applied", shu1_profile_name(st.material_profile));
     }
 
+    if (shu1_explicit_job_start(root)) shu1_settings_stop(&st);
     st.work_on = json_bool(root, "work_on", st.work_on);
     st.work_mode = json_int_clamp(root, "work_mode", st.work_mode, SHU1_MODE_AUTO, SHU1_MODE_HEALTH_TEST);
     st.target_temp_c = json_int_clamp(root, "set_temp", st.target_temp_c, 0, CONFIG_SHU1_MAX_TARGET_TEMP_C);
@@ -794,7 +825,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
     st.virtual_door_drop_c = json_int_clamp(root, "virtual_door_drop_c", st.virtual_door_drop_c, 1, 30);
     st.virtual_door_rate_c_per_min = json_int_clamp(root, "virtual_door_rate_c_per_min", st.virtual_door_rate_c_per_min, 1, 60);
     st.virtual_door_min_base_temp_c = json_int_clamp(root, "virtual_door_min_base_temp", st.virtual_door_min_base_temp_c, 20, CONFIG_SHU1_MAX_TARGET_TEMP_C);
-    st.virtual_door_action = json_int_clamp(root, "virtual_door_action", st.virtual_door_action, SHU1_VDOOR_ACTION_NOTIFY_ONLY, SHU1_VDOOR_ACTION_STOP_HEATER);
+    st.virtual_door_action = SHU1_VDOOR_ACTION_NOTIFY_ONLY;
     cJSON *ack_vdoor = cJSON_GetObjectItem(root, "ack_virtual_door_open");
     if (cJSON_IsBool(ack_vdoor) && cJSON_IsTrue(ack_vdoor)) {
         st.virtual_door_open_pending = false;
@@ -871,11 +902,8 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
     st.symbiont_ventilation_allowed = json_bool(root, "symbiont_ventilation_allowed", st.symbiont_ventilation_allowed);
     st.symbiont_safe_control_enabled = json_bool(root, "symbiont_safe_control_enabled", st.symbiont_safe_control_enabled);
     st.symbiont_policy = json_int_clamp(root, "symbiont_policy", st.symbiont_policy, SHU1_SYMBIONT_POLICY_READ_ONLY, SHU1_SYMBIONT_POLICY_CLIMATE_SAFE);
-    if (cJSON_IsTrue(cJSON_GetObjectItem(root, "arm_output_safety_latch"))) {
-        st.output_safety_latch_armed = st.heater_output_verified && st.fan_output_verified && st.sensors_verified && (!st.moonraker_verified || st.setup_validation_passed);
-        if (st.output_safety_latch_armed) shu1_event_log_add("info", "output_latch_armed", "runtime output safety latch armed by user/app after verification flags");
-    }
-    if (cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch"))) st.output_safety_latch_armed = false;
+    // Legacy arm field is inert. Normal work requests admit a session through
+    // the measured safety gate; legacy disarm is handled as unconditional OFF.
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "ack_incident_report"))) st.incident_report_pending = false;
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "ack_symbiont_notification"))) st.symbiont_notification_pending = false;
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "generate_incident_report"))) {
@@ -1004,6 +1032,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
         st.drying_end_ms = 0;
     }
 
+    shu1_finish_job_command(&st, root, esp_timer_get_time() / 1000);
     if ((st.work_on || st.scheduled_preheat_enabled) && !shu1_control_start_allowed()) {
         shu1_control_guard_end(&policy_guard);
         cJSON_Delete(root);
@@ -1075,6 +1104,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
         if (cJSON_IsString(mh)) snprintf(cfg.moonraker_host, sizeof(cfg.moonraker_host), "%s", mh->valuestring);
         if (cJSON_IsNumber(mp)) cfg.moonraker_port = mp->valueint;
         if (persist_err == ESP_OK) persist_err = shu1_settings_store_save_device_config(&cfg);
+        if (persist_err == ESP_OK) shu1_device_config_require_restart();
     }
 
 
@@ -1201,6 +1231,12 @@ static esp_err_t token_post_handler(httpd_req_t *req) {
         ? "{\"ok\":true,\"token_set\":true}"
         : "{\"ok\":true,\"token_set\":false}");
     return ESP_OK;
+}
+
+static esp_err_t auth_check_get_handler(httpd_req_t *req) {
+    add_common_headers(req);
+    if (reject_unauthorized(req)) return ESP_OK;
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
 }
 
 static esp_err_t ota_info_get_handler(httpd_req_t *req) {
@@ -1414,6 +1450,7 @@ esp_err_t shu1_api_server_start(void) {
     httpd_uri_t heartbeat_v2_post = {.uri = "/api/v2/heartbeat", .method = HTTP_POST, .handler = heartbeat_post_handler};
     httpd_uri_t events = {.uri = "/api/events", .method = HTTP_GET, .handler = events_get_handler};
     httpd_uri_t ota_info = {.uri = "/api/v2/ota", .method = HTTP_GET, .handler = ota_info_get_handler};
+    httpd_uri_t auth_check = {.uri = "/api/v2/auth", .method = HTTP_GET, .handler = auth_check_get_handler};
     httpd_uri_t ota_update = {.uri = "/update", .method = HTTP_POST, .handler = ota_update_post_handler};
     httpd_uri_t ota_update_v2 = {.uri = "/api/v2/update", .method = HTTP_POST, .handler = ota_update_post_handler};
     httpd_uri_t boot_inactive = {.uri = "/api/v2/boot-inactive", .method = HTTP_POST, .handler = boot_inactive_post_handler};
@@ -1421,7 +1458,7 @@ esp_err_t shu1_api_server_start(void) {
     const httpd_uri_t *routes[] = {
         &health, &status, &settings_post, &probe_post, &token_post,
         &token_v2_post, &heartbeat_post, &heartbeat_v2_post, &events,
-        &ota_info, &ota_update, &ota_update_v2, &boot_inactive,
+        &auth_check, &ota_info, &ota_update, &ota_update_v2, &boot_inactive,
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); ++i) {
         esp_err_t err = httpd_register_uri_handler(server, routes[i]);

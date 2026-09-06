@@ -23,7 +23,14 @@ class BleSnapHeaterRepository(
 
     override fun snapshot(): HeaterSnapshot = runBlocking {
         val raw = if (leaseId.isNotBlank()) {
-            client.writeControl(JSONObject().put("heartbeat", leaseId).toString())
+            try {
+                client.writeControl(JSONObject().put("heartbeat", leaseId).toString())
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                leaseId = ""
+                client.readStatus()
+            }
         } else {
             client.readStatus()
         }
@@ -46,36 +53,41 @@ class BleSnapHeaterRepository(
         return value
     }
 
-    override fun setMode(mode: AppMode): HeaterSnapshot {
-        val payload = if (mode == AppMode.SafeStop) {
-            safeStopPayload()
-        } else {
-            JSONObject()
-                .put("work_mode", mode.toFirmwareWorkMode())
-                .put("work_on", true)
-                .put("takeover", true)
-        }
-        return command(payload)
-    }
+    override fun setMode(mode: AppMode): HeaterSnapshot = applySettings(snapshot().copy(mode = mode))
 
     override fun setTarget(targetC: Int): HeaterSnapshot {
         return command(JSONObject().put("set_temp", targetC).put("takeover", true))
     }
 
-    override fun applySettings(snapshot: HeaterSnapshot): HeaterSnapshot {
-        if (snapshot.mode == AppMode.SafeStop) {
-            return command(safeStopPayload())
-        }
-        val payload = JSONObject()
-            .put("work_mode", snapshot.mode.toFirmwareWorkMode())
-            .put("takeover", true)
-            .put("set_temp", snapshot.targetC)
-            .put("work_on", snapshot.mode != AppMode.SafeStop)
-            .put("preheat_hold_min", snapshot.preheatHeatSoakMin)
-            .put("custom_timer", (snapshot.dryingTimeMin / 60).coerceAtLeast(1))
-            .put("tempering_duration_min", snapshot.temperingDurationMin)
-        return command(payload)
+    override fun acknowledgeVirtualDoor(detectedMs: Long): HeaterSnapshot = runBlocking {
+        rememberControl(client.writeControl(JSONObject().put("virtual_door_ack", detectedMs).toString()).toBleSnapshot())
     }
+    override fun setVirtualDoorDetection(enabled: Boolean): HeaterSnapshot =
+        command(JSONObject().put("virtual_door_detection_enabled", enabled).put("takeover", true))
+
+    override fun provisionRestToken(token: String) {
+        require(token.length in 16..64)
+        runBlocking { client.writeControl(JSONObject().put("rest_token", token).toString()) }
+    }
+
+    override fun configurePrinter(host: String, port: Int, ssid: String, password: String): HeaterSnapshot =
+        command(printerConfiguration(host, port, ssid, password))
+
+    override fun setupWifi(action: String, ssid: String, password: String): HeaterSnapshot {
+        require(action == "scan" || action == "connect")
+        val request = JSONObject().put("action", action)
+        if (action == "connect") {
+            require(ssid.toByteArray(Charsets.UTF_8).size in 1..32)
+            require(password.isEmpty() || password.toByteArray(Charsets.UTF_8).size in 8..63)
+            request.put("ssid", ssid).put("password", password)
+        }
+        return command(JSONObject().put("wifi_setup", request))
+    }
+
+    override fun applySettings(snapshot: HeaterSnapshot): HeaterSnapshot = command(snapshot.jobPayload())
+
+    override fun savePreferences(snapshot: HeaterSnapshot): HeaterSnapshot = command(snapshot.preferencesPayload().put("takeover", true))
+    override fun schedulePreheat(snapshot: HeaterSnapshot): HeaterSnapshot = command(snapshot.schedulePayload())
 
     override fun applySafety(snapshot: HeaterSnapshot, armLatch: Boolean, disarmLatch: Boolean): HeaterSnapshot {
         val payload = JSONObject()
@@ -105,10 +117,13 @@ private fun safeStopPayload(): JSONObject =
 private fun JSONObject.toBleSnapshot(): HeaterSnapshot {
     val control = optJSONObject("control") ?: JSONObject()
     val mode = firmwareModeToAppMode(
+        workOn = if (has("on")) optBoolean("on") else null,
         workMode = optInt("m", 1),
         preheatRunning = optInt("ph", 0) > 0,
         dryingRunning = optBoolean("dry", false),
         temperingPhase = optInt("tmph", 0),
+        temperingEnabled = optBoolean("tmpen", false),
+        finishConditioningMode = optInt("finish", 1),
     )
     val material = optString("prof_name", optString("mat", "Custom")).ifBlank { "Custom" }
     val moonrakerConnected = optBoolean("mr", false)
@@ -128,9 +143,12 @@ private fun JSONObject.toBleSnapshot(): HeaterSnapshot {
         fanOutputVerified = optBoolean("fv", false),
         sensorsVerified = optBoolean("sv", false),
         moonrakerVerified = optBoolean("mv", false),
-        heaterOutputBuildEnabled = true,
+        heaterOutputBuildEnabled = optBoolean("heater_build", false),
         fanOn = optBoolean("f", false),
         moonraker = if (moonrakerConnected) "Connected" else "Read-only / waiting",
+        printerDataReady = optBoolean("pr_ready", false),
+        deviceId = optString("device_id", ""),
+        wifi = wifiSetupStatus(),
         ble = "BLE connected",
         material = material,
         printerState = optString("ps", "standby").ifBlank { "standby" },
@@ -140,9 +158,9 @@ private fun JSONObject.toBleSnapshot(): HeaterSnapshot {
         materialAdvice = material,
         mode = mode,
         manualFanAssist = optBoolean("f", false),
-        preheatHeatSoakMin = 15,
+        preheatHeatSoakMin = optInt("phhold", 15),
         dryingTimeMin = (optLong("rem", 0L) / 60L).toInt().coerceAtLeast(0),
-        temperingDurationMin = 45,
+        temperingDurationMin = optInt("tmpmin", 45),
         lastConfirmedSettings = "Synced over BLE",
         warmupEtaMin = (optInt("eta", 0) / 60).coerceAtLeast(0),
         heatSoakReady = optInt("soakr", 0) <= 0,
@@ -150,7 +168,10 @@ private fun JSONObject.toBleSnapshot(): HeaterSnapshot {
         printRiskScore = optInt("risk", 0),
         printRiskMessage = if (optBoolean("riskp", false)) "Print risk warning pending" else "No active risk message",
         virtualDoorOpen = optBoolean("vdoor", false),
+        virtualDoorDetectionEnabled = optBoolean("vdoor_enabled", true),
         virtualDoorPending = optBoolean("vdoor_pending", false),
+        virtualDoorDetectedMs = optLong("vdoor_ms", 0),
+        virtualDoorDropC = optDouble("vdoor_drop", 0.0),
         mismatchWarningEnabled = true,
         plaProtectionEnabled = !optBoolean("pla", false),
         antiWarpEnabled = optBoolean("aw", true),
@@ -169,7 +190,7 @@ private fun JSONObject.toBleSnapshot(): HeaterSnapshot {
         controlStateRevision = control.optLong("state_revision", 0L),
         controlLeaseId = control.optString("lease_id", ""),
         controlLeaseRemainingMs = control.optLong("lease_remaining_ms", 0L),
-    )
+    ).withPreferences(optJSONObject("prefs") ?: JSONObject())
 }
 
 private fun String.toBleSnapshot(): HeaterSnapshot {

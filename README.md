@@ -1,5 +1,15 @@
 # SnapHeater U1
 
+## September 2026 development update
+
+Matching Android and firmware sources now include the connection wizard,
+Panda Wi-Fi provisioning, printer discovery, saved heater names, autonomous
+execution after phone disconnection, all-mode virtual-door alerts, unified
+BLE/REST commands, standalone tempering and configurable scheduled preheat.
+See [current implementation and remaining work](docs/CURRENT_IMPLEMENTATION.md)
+and [the Android/firmware contract](docs/APP_CONTROL_CONTRACT.md).
+This is an experimental source update, not a hardware-qualified binary release.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Target: ESP32--C3](https://img.shields.io/badge/Target-ESP32--C3-blue.svg)](#build-target)
 [![Status: DragonBreath HW Recovery](https://img.shields.io/badge/Status-DragonBreath%20HW%20Recovery-orange.svg)](#current-stage)
@@ -20,8 +30,9 @@ is the original Panda Breath V1.0/V1.0.1 electronics, not AirGuard 300.
 > findings provided the essential foundation for this revival.
 
 > Current status: **DragonBreath hardware recovery**. The recovered hardware map
-> is present, but repository defaults keep fan and heater control build-disabled;
-> boot always starts with both outputs OFF and the runtime safety latch disarmed.
+> is present. Experimental tester defaults enable fan and heater support;
+> boot does not start heating. Normal mode activation needs no separate unlock.
+> Use the [functional tester build instructions](docs/TESTER_BUILD.md), not an older cached configuration.
 > The pinned, repository-wide comparison and remaining blockers are documented in
 > [public safety status](docs/SAFETY_STATUS.md).
 

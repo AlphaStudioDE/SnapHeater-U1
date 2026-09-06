@@ -10,6 +10,7 @@
 #include "profiles.h"
 #include "settings_store.h"
 #include "command_validation.h"
+#include "job_commands.h"
 #include "event_log.h"
 #include "heater.h"
 #include "safety_latch.h"
@@ -18,6 +19,7 @@
 #include "control_lease.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "wifi_sta.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -77,7 +79,7 @@ static bool json_bool(cJSON *root, const char *name, bool current) {
 
 static bool has_control_fields(cJSON *root) {
     const char *names[] = {
-        "safe_stop", "emergency_stop", "clear_heater_fault",
+        "safe_stop", "emergency_stop", "clear_heater_fault", "tempering_start_now",
         "warehouse_temp_offset", "ptc_temp_offset",
         "work_on", "work_mode", "set_temp", "filtertemp", "hotbedtemp", "ptc_cutoff",
         "filament_drying_mode", "isrunning", "custom_temp", "custom_timer",
@@ -106,7 +108,7 @@ static bool has_control_fields(cJSON *root) {
         "fan_output_verified", "sensors_verified", "moonraker_verified", "arm_output_safety_latch", "disarm_output_safety_latch",
         "notification_min_level", "language_code", "local_only_mode", "ota_enabled", "contest_showcase_mode_enabled",
         "symbiont_mode_enabled", "symbiont_ventilation_allowed", "symbiont_safe_control_enabled", "symbiont_policy", "ack_symbiont_notification",
-        "wifi_ssid", "wifi_password", "moonraker_host", "moonraker_port", "factory_reset",
+        "wifi_ssid", "wifi_password", "moonraker_host", "moonraker_port", "factory_reset", "wifi_setup",
         "heartbeat", "lease_id", "expected_revision", "takeover"
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
@@ -220,6 +222,46 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
         if (json_ok) json_ok = cJSON_AddStringToObject(json, "v", SHU1_FW_VERSION) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(json, "on", st.settings.work_on) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "m", st.settings.work_mode) != NULL;
+        if (json_ok) json_ok = shu1_wifi_status_json(json);
+        cJSON *prefs = json_ok ? cJSON_AddObjectToObject(json, "prefs") : NULL;
+        json_ok = json_ok && prefs != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "virtual_door_detection_enabled", st.settings.virtual_door_detection_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "heat_soak_enabled", st.settings.heat_soak_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "auto_material_profile_enabled", st.settings.auto_material_profile_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "material_mismatch_warning_enabled", st.settings.material_mismatch_warning_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "pla_protection_enabled", st.settings.pla_protection_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "anti_warp_enabled", st.settings.anti_warp_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "large_print_protection_enabled", st.settings.large_print_protection_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "safe_overnight_enabled", st.settings.safe_overnight_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "pause_hold_enabled", st.settings.pause_hold_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "smart_resume_enabled", st.settings.smart_resume_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "start_print_warning_enabled", st.settings.start_print_warning_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "airflow_detection_enabled", st.settings.airflow_detection_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "temp_history_enabled", st.settings.temp_history_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "incident_report_enabled", st.settings.incident_report_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "local_recipes_enabled", st.settings.local_recipes_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "local_only_mode", st.settings.local_only_mode) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "contest_showcase_mode_enabled", st.settings.contest_showcase_mode_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "symbiont_mode_enabled", st.settings.symbiont_mode_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "symbiont_ventilation_allowed", st.settings.symbiont_ventilation_allowed) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(prefs, "scheduled_preheat_enabled", st.settings.scheduled_preheat_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(prefs, "scheduled_preheat_delay_min", st.settings.scheduled_preheat_delay_min) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(prefs, "scheduled_preheat_target", st.settings.scheduled_preheat_target_c) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(prefs, "scheduled_preheat_hold_min", st.settings.scheduled_preheat_hold_min) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "phhold", st.settings.preheat_hold_min) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(json, "heater_build", CONFIG_SHU1_ENABLE_HEATER_OUTPUT) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(json, "vdoor_enabled", st.settings.virtual_door_detection_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(json, "vdoor", st.settings.virtual_door_open) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(json, "vdoor_pending", st.settings.virtual_door_open_pending) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "vdoor_ms", (double)st.settings.virtual_door_detected_ms) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "vdoor_drop", st.settings.virtual_door_last_drop_c) != NULL;
+        char device_id[13];
+        shu1_device_id(device_id, sizeof(device_id));
+        if (json_ok) json_ok = cJSON_AddStringToObject(json, "device_id", device_id) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(json, "tmpen", st.settings.tempering_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "finish", st.settings.finish_conditioning_mode) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "tmph", st.settings.tempering_phase) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "tmpmin", st.settings.tempering_duration_min) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "set", st.settings.work_mode == SHU1_MODE_PREHEAT ? st.settings.preheat_target_temp_c : st.settings.target_temp_c) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "tc", st.runtime.chamber_temp_c) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "tp", st.runtime.ptc_temp_c) != NULL;
@@ -228,6 +270,9 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
         if (json_ok) json_ok = cJSON_AddStringToObject(json, "err", shu1_heater_fault_str(st.runtime.heater_fault)) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "safe", st.runtime.safety_score) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(json, "mr", st.printer.moonraker_connected) != NULL;
+        if (json_ok) json_ok = cJSON_AddBoolToObject(json, "pr_ready", !shu1_device_config_restart_required() && st.printer.moonraker_connected &&
+            st.printer.klippy_ready && st.printer.subscribed && st.printer.last_update_ms > 0 &&
+            now_ms >= st.printer.last_update_ms && now_ms - st.printer.last_update_ms <= SHU1_PRINTER_STALE_MS) != NULL;
         if (json_ok) json_ok = cJSON_AddStringToObject(json, "ps", st.printer.normalized_state) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "p", st.printer.print_progress) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "tool", st.printer.active_tool) != NULL;
@@ -283,6 +328,7 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
         if (json_ok) json_ok = cJSON_AddNumberToObject(json_child_1, "fan_postrun_min", st.settings.fan_postrun_min) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json_child_1, "cool_release", st.settings.cool_release_c) != NULL;
         if (json_ok) json_ok = cJSON_AddBoolToObject(json_child_1, "tempering_enabled", st.settings.tempering_enabled) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json_child_1, "finish_conditioning_mode", st.settings.finish_conditioning_mode) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json_child_1, "tempering_end_temp", st.settings.tempering_end_temp_c) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json_child_1, "tempering_duration_min", st.settings.tempering_duration_min) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json_child_1, "tempering_phase", st.settings.tempering_phase) != NULL;
@@ -437,12 +483,47 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
 #endif
 
     // Initial REST provisioning is local BLE, never an unauthenticated HTTP fallback.
+    cJSON *wifi_setup = cJSON_GetObjectItemCaseSensitive(root, "wifi_setup");
+    bool wifi_stop = cJSON_IsTrue(cJSON_GetObjectItem(root, "safe_stop")) ||
+        cJSON_IsTrue(cJSON_GetObjectItem(root, "emergency_stop")) ||
+        cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch")) ||
+        cJSON_IsFalse(cJSON_GetObjectItem(root, "work_on"));
+    if (wifi_setup && !wifi_stop) {
+        bool dedicated = true;
+        for (cJSON *item = root->child; item; item = item->next) {
+            if (strcmp(item->string, "wifi_setup") && strcmp(item->string, "expected_revision") &&
+                strcmp(item->string, "lease_id")) dedicated = false;
+        }
+        shu1_control_snapshot_t control;
+        shu1_control_snapshot(&control);
+        cJSON *revision = cJSON_GetObjectItemCaseSensitive(root, "expected_revision");
+        bool fresh = cJSON_IsNumber(revision) && revision->valuedouble == (double)control.revision;
+        esp_err_t err = g_ble_unlocked && dedicated && fresh
+            ? shu1_wifi_setup_request(wifi_setup) : ESP_ERR_INVALID_STATE;
+        if (err == ESP_OK) shu1_control_release_any(); // invalidate pre-setup commands
+        cJSON_Delete(root);
+        return err == ESP_OK ? 0 : BLE_ATT_ERR_UNLIKELY;
+    }
+
     cJSON *rest_token = cJSON_GetObjectItemCaseSensitive(root, "rest_token");
+    cJSON *receipt = cJSON_GetObjectItemCaseSensitive(root, "virtual_door_ack");
+    if (receipt && root->child == receipt && !receipt->next && g_ble_unlocked &&
+        cJSON_IsNumber(receipt) && receipt->valuedouble > 0 && receipt->valuedouble < 9007199254740992.0) {
+        shu1_virtual_door_ack((int64_t)receipt->valuedouble);
+        cJSON_Delete(root);
+        return 0;
+    }
+    if (!wifi_stop && shu1_control_maintenance_active() &&
+        (cJSON_GetObjectItem(root, "wifi_ssid") || cJSON_GetObjectItem(root, "wifi_password") ||
+         cJSON_GetObjectItem(root, "moonraker_host") || cJSON_GetObjectItem(root, "moonraker_port"))) {
+        cJSON_Delete(root);
+        return BLE_ATT_ERR_UNLIKELY;
+    }
     if (rest_token) {
         bool dedicated = cJSON_IsObject(root) && root->child == rest_token && !rest_token->next;
         if (!g_ble_unlocked || !dedicated || !cJSON_IsString(rest_token) ||
             strlen(rest_token->valuestring) < 16 || strlen(rest_token->valuestring) > 64 ||
-            !shu1_control_maintenance_begin()) {
+            !shu1_control_network_setup_begin()) {
             cJSON_Delete(root);
             return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
         }
@@ -489,6 +570,7 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     shu1_settings_t st = shu1_state_get_settings();
     const bool was_work_on = st.work_on;
     const bool stopping = cJSON_IsTrue(cJSON_GetObjectItem(root, "safe_stop")) ||
+        cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch")) ||
         cJSON_IsTrue(cJSON_GetObjectItem(root, "emergency_stop")) ||
         cJSON_IsFalse(cJSON_GetObjectItem(root, "work_on"));
     cJSON *chamber_offset = cJSON_GetObjectItem(root, "warehouse_temp_offset");
@@ -554,6 +636,7 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     bool emergency_stop = cJSON_IsTrue(cJSON_GetObjectItem(root, "emergency_stop"));
     if (emergency_stop) shu1_safety_latch_trip_volatile(SHU1_HEATER_PANIC_OFF);
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "safe_stop")) ||
+        cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch")) ||
         cJSON_IsFalse(cJSON_GetObjectItem(root, "work_on")) || emergency_stop) {
         shu1_control_release_any();
         g_ble_lease_proven = false;
@@ -583,6 +666,7 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
         shu1_event_log_add("info", "ble_profile_applied", shu1_profile_name(st.material_profile));
     }
 
+    if (shu1_explicit_job_start(root)) shu1_settings_stop(&st);
     st.work_on = json_bool(root, "work_on", st.work_on);
     st.work_mode = json_int_clamp(root, "work_mode", st.work_mode, SHU1_MODE_AUTO, SHU1_MODE_HEALTH_TEST);
     st.target_temp_c = json_int_clamp(root, "set_temp", st.target_temp_c, 0, CONFIG_SHU1_MAX_TARGET_TEMP_C);
@@ -637,7 +721,7 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     st.virtual_door_drop_c = json_int_clamp(root, "virtual_door_drop_c", st.virtual_door_drop_c, 1, 30);
     st.virtual_door_rate_c_per_min = json_int_clamp(root, "virtual_door_rate_c_per_min", st.virtual_door_rate_c_per_min, 1, 60);
     st.virtual_door_min_base_temp_c = json_int_clamp(root, "virtual_door_min_base_temp", st.virtual_door_min_base_temp_c, 20, CONFIG_SHU1_MAX_TARGET_TEMP_C);
-    st.virtual_door_action = json_int_clamp(root, "virtual_door_action", st.virtual_door_action, SHU1_VDOOR_ACTION_NOTIFY_ONLY, SHU1_VDOOR_ACTION_STOP_HEATER);
+    st.virtual_door_action = SHU1_VDOOR_ACTION_NOTIFY_ONLY;
     cJSON *ack_vdoor = cJSON_GetObjectItem(root, "ack_virtual_door_open");
     if (cJSON_IsBool(ack_vdoor) && cJSON_IsTrue(ack_vdoor)) { st.virtual_door_open_pending = false; st.door_open_pending = false; }
     cJSON *clear_vdoor = cJSON_GetObjectItem(root, "clear_virtual_door_open");
@@ -698,11 +782,8 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     st.symbiont_ventilation_allowed = json_bool(root, "symbiont_ventilation_allowed", st.symbiont_ventilation_allowed);
     st.symbiont_safe_control_enabled = json_bool(root, "symbiont_safe_control_enabled", st.symbiont_safe_control_enabled);
     st.symbiont_policy = json_int_clamp(root, "symbiont_policy", st.symbiont_policy, SHU1_SYMBIONT_POLICY_READ_ONLY, SHU1_SYMBIONT_POLICY_CLIMATE_SAFE);
-    if (cJSON_IsTrue(cJSON_GetObjectItem(root, "arm_output_safety_latch"))) {
-        st.output_safety_latch_armed = st.heater_output_verified && st.fan_output_verified && st.sensors_verified && (!st.moonraker_verified || st.setup_validation_passed);
-        if (st.output_safety_latch_armed) shu1_event_log_add("info", "output_latch_armed", "runtime output safety latch armed by BLE after verification flags");
-    }
-    if (cJSON_IsTrue(cJSON_GetObjectItem(root, "disarm_output_safety_latch"))) st.output_safety_latch_armed = false;
+    // Legacy arm field is inert. Normal work requests admit a session through
+    // the measured safety gate; legacy disarm is handled as unconditional OFF.
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "ack_incident_report"))) st.incident_report_pending = false;
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "ack_symbiont_notification"))) st.symbiont_notification_pending = false;
     if (cJSON_IsTrue(cJSON_GetObjectItem(root, "generate_incident_report"))) {
@@ -807,6 +888,7 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
     cJSON *dry = cJSON_GetObjectItem(root, "isrunning");
     if (cJSON_IsBool(dry)) apply_drying_start_stop(&st, cJSON_IsTrue(dry));
 
+    shu1_finish_job_command(&st, root, esp_timer_get_time() / 1000);
     if ((st.work_on || st.scheduled_preheat_enabled) && !shu1_control_start_allowed()) {
         shu1_control_guard_end(&policy_guard);
         cJSON_Delete(root);
@@ -879,6 +961,7 @@ static int handle_control_write(struct ble_gatt_access_ctxt *ctxt) {
         if (cJSON_IsString(mh)) snprintf(cfg.moonraker_host, sizeof(cfg.moonraker_host), "%s", mh->valuestring);
         if (cJSON_IsNumber(mp)) cfg.moonraker_port = mp->valueint;
         if (persist_err == ESP_OK) persist_err = shu1_settings_store_save_device_config(&cfg);
+        if (persist_err == ESP_OK) shu1_device_config_require_restart();
     }
 
 

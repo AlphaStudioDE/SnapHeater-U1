@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="244" viewBox="0 0 1000 244">
+<rect width="1000" height="244" rx="20" fill="#101318"/>
+<text x="28" y="38" font-family="sans-serif" font-size="18" fill="#f6f6f6">SnapHeater U1 · ikony trybów</text>
+<g transform="translate(20,60)">
+<rect width="180" height="162" rx="20" fill="#20252c"/>
+<g transform="translate(54,20) scale(3)" fill="none" stroke="#ffad62" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14V5a3 3 0 0 1 6 0v9a5 5 0 1 1-6 0 M10 7v10 M17 8l3-3 3 3 M20 5v10"/></g>
+<text x="90" y="132" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#ffffff">Rozgrzewanie</text>
+</g>
+<g transform="translate(216,60)">
+<rect width="180" height="162" rx="20" fill="#20252c"/>
+<g transform="translate(54,20) scale(3)" fill="none" stroke="#ffad62" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14V5a3 3 0 0 1 6 0v9a5 5 0 1 1-6 0 M12 7v10 M11 18h2"/></g>
+<text x="90" y="132" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#ffffff">Grzanie</text>
+</g>
+<g transform="translate(412,60)">
+<rect width="180" height="162" rx="20" fill="#20252c"/>
+<g transform="translate(54,20) scale(3)" fill="none" stroke="#ffad62" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12a7 7 0 1 1-14 0 7 7 0 0 1 14 0 M10 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0 M8 5v3 M8 16v3 M1 12h3 M12 12h3 M18 19c-3-3 3-5 0-8s3-5 0-8 M22 19c-3-3 3-5 0-8s3-5 0-8"/></g>
+<text x="90" y="132" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#ffffff">Suszenie filamentu</text>
+</g>
+<g transform="translate(608,60)">
+<rect width="180" height="162" rx="20" fill="#20252c"/>
+<g transform="translate(54,20) scale(3)" fill="none" stroke="#ffad62" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V3h18v18Z M3 7h18 M10 7v4h4V7 M11 11l1 2 1-2 M7 17h10v4 M5 17h14"/></g>
+<text x="90" y="132" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#ffffff">Drukarka 3D</text>
+</g>
+<g transform="translate(804,60)">
+<rect width="180" height="162" rx="20" fill="#20252c"/>
+<g transform="translate(54,20) scale(3)" fill="none" stroke="#ffad62" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 14V5a3 3 0 0 1 6 0v9a5 5 0 1 1-6 0 M10 7v10 M17 12l3 3 3-3 M20 5v10"/></g>
+<text x="90" y="132" text-anchor="middle" font-family="sans-serif" font-size="15" fill="#ffffff">Schładzanie</text>
+</g>
+</svg>

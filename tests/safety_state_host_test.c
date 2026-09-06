@@ -133,6 +133,19 @@ int main(void) {
     shu1_control_guard_end(&guard);
 
     // Trip must cut before NVS even if persistence fails. Failed clear stays latched.
+    guard = shu1_control_guard_begin();
+    st.work_on = true; shu1_state_update_settings_command(&st);
+    assert(!shu1_control_network_setup_begin());
+    shu1_settings_stop(&st); shu1_state_update_settings_command(&st);
+    rt.chamber_instant_temp_c = rt.ptc_instant_temp_c = 35;
+    shu1_state_update_runtime(&rt);
+    assert(!shu1_control_maintenance_begin()); // OTA still requires cold sensors.
+    assert(shu1_control_network_setup_begin()); // Networking does not flash/reboot.
+    assert(!shu1_control_start_allowed() && !shu1_control_network_setup_begin());
+    assert(!shu1_control_maintenance_begin());
+    shu1_control_maintenance_end();
+    shu1_control_guard_end(&guard);
+
     ssr_on = true; persist_fail = true;
     assert(shu1_safety_latch_trip(SHU1_HEATER_OVERTEMP) != ESP_OK);
     assert(!ssr_on && shu1_safety_latch_is_set() && persist_attempts == 1);

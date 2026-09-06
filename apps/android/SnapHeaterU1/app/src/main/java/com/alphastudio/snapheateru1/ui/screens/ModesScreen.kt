@@ -1,39 +1,30 @@
 /*
- * SnapHeater U1
- * Copyright (c) 2026 Damian Borkowski
- * SPDX-License-Identifier: MIT
+ * SnapHeater U1 — Copyright (c) 2026 Damian Borkowski — SPDX-License-Identifier: MIT
  */
-
 package com.alphastudio.snapheateru1.ui.screens
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import com.alphastudio.snapheateru1.ui.components.ActionLabel
+import com.alphastudio.snapheateru1.ui.components.ModeIcon
+import androidx.compose.material.icons.Icons
+
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.model.AppMode
+import com.alphastudio.snapheateru1.model.requiresPrinter
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
-import com.alphastudio.snapheateru1.ui.components.SectionTitle
-import com.alphastudio.snapheateru1.ui.components.StatusRow
-import com.alphastudio.snapheateru1.ui.detailRes
 import com.alphastudio.snapheateru1.ui.labelRes
-import com.alphastudio.snapheateru1.ui.theme.StatusColors
+import com.alphastudio.snapheateru1.ui.detailRes
 
 @Composable
 fun ModesScreen(
@@ -41,198 +32,98 @@ fun ModesScreen(
     heatingAllowed: Boolean,
     safetyWarning: String,
     onMode: (AppMode) -> Unit,
-    onSnapshotChange: (HeaterSnapshot) -> Unit,
     onConfirmSettings: (HeaterSnapshot) -> Unit,
+    printerAllowed: Boolean = true,
+    onPrinterSetup: () -> Unit = {},
 ) {
+    // Drafts are local: telemetry polling must not overwrite edits or display
+    // an unsubmitted selection as the device's actual mode.
+    var selectedName by rememberSaveable { mutableStateOf<String?>(null) }
+    var target by rememberSaveable { mutableStateOf(snapshot.targetC.coerceIn(30, 55)) }
+    var drying by rememberSaveable { mutableStateOf(snapshot.dryingTimeMin.coerceIn(30, 360)) }
+    var soak by rememberSaveable { mutableStateOf(snapshot.preheatHeatSoakMin.coerceIn(5, 45)) }
+    var temper by rememberSaveable { mutableStateOf(snapshot.temperingDurationMin.coerceIn(10, 180)) }
+    val selected = selectedName?.let { AppMode.valueOf(it) }
     ScreenColumn {
-        SectionTitle(stringResource(R.string.modes_title), stringResource(R.string.modes_subtitle))
-        if (!heatingAllowed) {
-            Card(
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-            ) {
-                Text(
-                    safetyWarning,
-                    color = StatusColors.Warning,
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+        Text(stringResource(R.string.daily_choose), style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.daily_draft_note), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (!printerAllowed) {
+            Text(stringResource(R.string.wizard_modes_locked))
+            TextButton(onClick = onPrinterSetup) { Text(stringResource(R.string.wizard_connect_printer)) }
         }
-
-        AppMode.entries.forEach { mode ->
-            val selected = snapshot.mode == mode
-            val blocked = mode != AppMode.SafeStop && !heatingAllowed
-            val modeLabel = stringResource(mode.labelRes())
-            Card(
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                ),
-            ) {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                ) {
-                    Text(modeLabel, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(stringResource(mode.detailRes()), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (selected) {
-                        ModeSettingsPanel(
-                            snapshot = snapshot,
-                            heatingAllowed = heatingAllowed,
-                            onSnapshotChange = onSnapshotChange,
-                            onConfirmSettings = onConfirmSettings,
-                        )
-                        Button(onClick = { onMode(AppMode.SafeStop) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.mode_safe_stop))
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = { onMode(mode) },
-                            enabled = !blocked,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.modes_select))
-                        }
+        if (selected == null) {
+            listOf(AppMode.Preheat, AppMode.Drying, AppMode.AutoStandby,
+                AppMode.AutoStandbyTempering, AppMode.ManualHold, AppMode.Tempering).forEach { mode ->
+                Card(onClick = { selectedName = mode.name }, enabled = !mode.requiresPrinter() || printerAllowed,
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ModeIcon(mode, tint = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(mode.labelRes()), style = MaterialTheme.typography.titleLarge)
+                        Text(stringResource(mode.detailRes()), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
+        } else {
+            TextButton(onClick = { selectedName = null }) { ActionLabel(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.daily_other_mode)) }
+            ModeIcon(selected, tint = MaterialTheme.colorScheme.primary)
+            Text(stringResource(selected.labelRes()), style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(selected.detailRes()), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Card(shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    ValueStepper(stringResource(R.string.dashboard_target), "$target °C",
+                        target > 30, target < 55, { target-- }, { target++ })
+                    when (selected) {
+                        AppMode.Drying -> ValueStepper(stringResource(R.string.label_drying_time), "$drying min",
+                            drying > 30, drying < 360, { drying = (drying - 15).coerceAtLeast(30) },
+                            { drying = (drying + 15).coerceAtMost(360) })
+                        AppMode.Preheat -> ValueStepper(stringResource(R.string.label_heat_soak), "$soak min",
+                            soak > 5, soak < 45, { soak = (soak - 5).coerceAtLeast(5) },
+                            { soak = (soak + 5).coerceAtMost(45) })
+                        AppMode.Tempering, AppMode.AutoStandbyTempering -> ValueStepper(stringResource(R.string.label_cooldown_time), "$temper min",
+                            temper > 10, temper < 180, { temper = (temper - 5).coerceAtLeast(10) },
+                            { temper = (temper + 5).coerceAtMost(180) })
+                        else -> Unit
+                    }
+                }
+            }
+            if (!heatingAllowed) Text(safetyWarning, color = MaterialTheme.colorScheme.error)
+            val modeLabel = stringResource(selected.labelRes())
+            Button(
+                enabled = heatingAllowed && (!selected.requiresPrinter() || printerAllowed),
+                onClick = {
+                    onConfirmSettings(snapshot.copy(mode = selected, targetC = target,
+                        dryingTimeMin = drying, preheatHeatSoakMin = soak,
+                        temperingDurationMin = temper, lastConfirmedSettings = modeLabel))
+                },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+            ) { ActionLabel(selected, stringResource(R.string.daily_apply_mode, modeLabel)) }
+        }
+        OutlinedButton(onClick = { onMode(AppMode.SafeStop) },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+            ActionLabel(Icons.Outlined.PowerSettingsNew, stringResource(R.string.daily_stop))
         }
     }
 }
 
 @Composable
-private fun ModeSettingsPanel(
-    snapshot: HeaterSnapshot,
-    heatingAllowed: Boolean,
-    onSnapshotChange: (HeaterSnapshot) -> Unit,
-    onConfirmSettings: (HeaterSnapshot) -> Unit,
-) {
-    val blocked = snapshot.mode != AppMode.SafeStop && !heatingAllowed
-    val modeLabel = stringResource(snapshot.mode.labelRes())
-    val pendingLabel = stringResource(R.string.common_pending)
-    Column(
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-    ) {
-        Text(stringResource(R.string.modes_mode_settings), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-        StatusRow(stringResource(R.string.label_saved_state), snapshot.lastConfirmedSettings, valueColor = confirmColor(snapshot, modeLabel))
-
-        when (snapshot.mode) {
-            AppMode.AutoStandby -> {
-                StatusRow(stringResource(R.string.label_printer_awareness), stringResource(R.string.value_moonraker_readonly), valueColor = StatusColors.Warning)
-                StatusRow(stringResource(R.string.label_material_profile), snapshot.material)
-                TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
-                }
+private fun ValueStepper(label: String, value: String, canDecrease: Boolean, canIncrease: Boolean,
+    decrease: () -> Unit, increase: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            OutlinedButton(onClick = decrease, enabled = canDecrease,
+                modifier = Modifier.weight(1f).sizeIn(minWidth = 64.dp, minHeight = 48.dp)) {
+                ActionLabel(Icons.Outlined.Remove, stringResource(R.string.daily_less))
             }
-            AppMode.ManualHold -> {
-                TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
-                }
-                ToggleRow(stringResource(R.string.label_fan_assist), snapshot.manualFanAssist) {
-                    onSnapshotChange(snapshot.copy(manualFanAssist = it).pendingSettings(pendingLabel))
-                }
-                StatusRow(stringResource(R.string.label_runtime_guard), stringResource(R.string.value_enabled), valueColor = StatusColors.Good)
-            }
-            AppMode.Preheat -> {
-                TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
-                }
-                DurationSlider(stringResource(R.string.label_heat_soak), snapshot.preheatHeatSoakMin, 5f..45f) {
-                    onSnapshotChange(snapshot.copy(preheatHeatSoakMin = it).pendingSettings(pendingLabel))
-                }
-                StatusRow(stringResource(R.string.label_start_condition), stringResource(R.string.value_manual_confirm), valueColor = StatusColors.Warning)
-            }
-            AppMode.Drying -> {
-                TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
-                }
-                DurationSlider(stringResource(R.string.label_drying_time), snapshot.dryingTimeMin, 30f..360f) {
-                    onSnapshotChange(snapshot.copy(dryingTimeMin = it).pendingSettings(pendingLabel))
-                }
-                StatusRow(stringResource(R.string.label_profile), snapshot.material)
-            }
-            AppMode.Tempering -> {
-                DurationSlider(stringResource(R.string.label_cooldown_time), snapshot.temperingDurationMin, 10f..180f) {
-                    onSnapshotChange(snapshot.copy(temperingDurationMin = it).pendingSettings(pendingLabel))
-                }
-                TargetSlider(snapshot.targetC) {
-                    onSnapshotChange(snapshot.copy(targetC = it).pendingSettings(pendingLabel))
-                }
-                StatusRow(stringResource(R.string.label_ramp_behavior), stringResource(R.string.value_controlled_cooldown), valueColor = StatusColors.Good)
-            }
-            AppMode.SafeStop -> {
-                StatusRow(stringResource(R.string.label_heater), stringResource(R.string.value_off_locked), strong = true, valueColor = StatusColors.Good)
-                StatusRow(stringResource(R.string.label_fan), stringResource(R.string.value_cooldown_allowed), valueColor = StatusColors.Warning)
-                Text(
-                    stringResource(R.string.modes_safe_stop_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Spacer(Modifier.width(12.dp))
+            OutlinedButton(onClick = increase, enabled = canIncrease,
+                modifier = Modifier.weight(1f).sizeIn(minWidth = 64.dp, minHeight = 48.dp)) {
+                ActionLabel(Icons.Outlined.Add, stringResource(R.string.daily_more))
             }
         }
-
-        Button(
-            onClick = {
-                onConfirmSettings(
-                    snapshot.copy(lastConfirmedSettings = confirmedSummary(snapshot, modeLabel)),
-                )
-            },
-            enabled = !blocked,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.modes_confirm_settings))
-        }
     }
-}
-
-@Composable
-private fun TargetSlider(targetC: Int, onTarget: (Int) -> Unit) {
-    Text(stringResource(R.string.modes_target, targetC), color = StatusColors.Warning, fontWeight = FontWeight.Bold)
-    Slider(
-        value = targetC.toFloat(),
-        onValueChange = { onTarget(it.toInt()) },
-        valueRange = 30f..70f,
-        steps = 39,
-    )
-}
-
-@Composable
-private fun DurationSlider(
-    label: String,
-    value: Int,
-    range: ClosedFloatingPointRange<Float>,
-    onValue: (Int) -> Unit,
-) {
-    Text(stringResource(R.string.modes_duration, label, value), color = StatusColors.Normal, fontWeight = FontWeight.Bold)
-    Slider(
-        value = value.toFloat(),
-        onValueChange = { onValue(it.toInt()) },
-        valueRange = range,
-        steps = ((range.endInclusive - range.start) / 5f).toInt().coerceAtLeast(0),
-    )
-}
-
-@Composable
-private fun ToggleRow(label: String, checked: Boolean, onChecked: (Boolean) -> Unit) {
-    Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-        Text(label)
-        Switch(checked = checked, onCheckedChange = onChecked)
-    }
-}
-
-private fun confirmColor(snapshot: HeaterSnapshot, modeLabel: String) =
-    if (snapshot.lastConfirmedSettings.startsWith(modeLabel)) StatusColors.Good else StatusColors.Warning
-
-private fun HeaterSnapshot.pendingSettings(pendingLabel: String) =
-    copy(lastConfirmedSettings = pendingLabel)
-
-private fun confirmedSummary(snapshot: HeaterSnapshot, modeLabel: String): String = when (snapshot.mode) {
-    AppMode.AutoStandby -> "$modeLabel / ${snapshot.targetC} C"
-    AppMode.ManualHold -> "$modeLabel / ${snapshot.targetC} C / fan ${if (snapshot.manualFanAssist) "on" else "off"}"
-    AppMode.Preheat -> "$modeLabel / ${snapshot.targetC} C / soak ${snapshot.preheatHeatSoakMin} min"
-    AppMode.Drying -> "$modeLabel / ${snapshot.targetC} C / ${snapshot.dryingTimeMin} min"
-    AppMode.Tempering -> "$modeLabel / ${snapshot.temperingDurationMin} min / ${snapshot.targetC} C"
-    AppMode.SafeStop -> "$modeLabel / outputs stopped"
 }

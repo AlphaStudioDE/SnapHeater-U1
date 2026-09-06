@@ -20,6 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.BluetoothSearching
+import com.alphastudio.snapheateru1.ui.components.ActionLabel
+import com.alphastudio.snapheateru1.ui.LanguagePicker
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
@@ -48,7 +54,14 @@ import com.alphastudio.snapheateru1.ui.theme.StatusColors
 
 @Composable
 fun ConnectScreen(
+    savedDevices: List<String>,
+    savedDeviceNames: Map<String, String>,
+    onRenameDevice: (String, String) -> Unit,
+    onSavedDevice: (String) -> Unit,
+    onPreview: () -> Unit,
     deviceAddress: String,
+    restToken: String,
+    onRestToken: (String) -> Unit,
     connectionStatus: String,
     isConnecting: Boolean,
     isScanning: Boolean,
@@ -58,6 +71,31 @@ fun ConnectScreen(
     onBleConnect: () -> Unit,
     onBleSearch: () -> Unit,
 ) {
+    var renamingAddress by remember { mutableStateOf<String?>(null) }
+    var newName by remember { mutableStateOf("") }
+    if (renamingAddress != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { renamingAddress = null },
+            title = { Text(stringResource(R.string.device_rename)) },
+            text = {
+                OutlinedTextField(newName, { if (it.length <= 40) newName = it },
+                    label = { Text(stringResource(R.string.device_name)) },
+                    supportingText = { Text(stringResource(R.string.device_name_help)) },
+                    singleLine = true)
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    renamingAddress?.let { onRenameDevice(it, newName) }
+                    renamingAddress = null
+                }) { Text(stringResource(R.string.device_name_save)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { renamingAddress = null }) {
+                    Text(stringResource(R.string.device_name_cancel))
+                }
+            },
+        )
+    }
     val ready = stringResource(R.string.status_ready)
     val canConnectOverBle = deviceAddress.startsWith("ble://", ignoreCase = true)
     val canConnectOverLan = deviceAddress.isNotBlank() &&
@@ -72,6 +110,39 @@ fun ConnectScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Spacer(modifier = Modifier.height(8.dp))
+        if (savedDevices.isNotEmpty()) {
+            Text(stringResource(R.string.connect_saved_devices), style = MaterialTheme.typography.titleLarge)
+            savedDevices.forEach { address ->
+                OutlinedButton(
+                    onClick = { onSavedDevice(address) },
+                    enabled = !isConnecting && !isScanning,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        ActionLabel(
+                            if (address.startsWith("ble://")) Icons.Filled.Bluetooth else Icons.Outlined.Wifi,
+                            savedDeviceNames[address] ?: "SH_?",
+                        )
+                        Text(address.removePrefix("ble://").removePrefix("http://").removePrefix("https://"),
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                androidx.compose.material3.TextButton(enabled = !isConnecting && !isScanning, onClick = {
+                    newName = savedDeviceNames[address].orEmpty()
+                    renamingAddress = address
+                }) { ActionLabel(Icons.Outlined.Edit, stringResource(R.string.device_rename)) }
+            }
+            Text(stringResource(R.string.connect_saved_hint), style = MaterialTheme.typography.bodySmall)
+        }
+        Text(stringResource(R.string.wizard_snapheater), style = MaterialTheme.typography.titleLarge)
+        LanguagePicker()
+        OutlinedButton(
+            onClick = onPreview,
+            enabled = !isConnecting && !isScanning,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            ActionLabel(Icons.Outlined.Visibility, stringResource(R.string.visual_preview_open))
+        }
         StatusPill(stringResource(R.string.status_local_only), StatusColors.Normal)
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -110,15 +181,21 @@ fun ConnectScreen(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     label = { Text(stringResource(R.string.connect_device_address)) },
-                    placeholder = { Text("192.168.1.80") },
+                placeholder = { Text("192.168.1.80") },
                 )
 
+                OutlinedTextField(value = restToken, onValueChange = onRestToken,
+                    label = { Text(stringResource(R.string.rest_token)) }, singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth())
+                Text(stringResource(R.string.rest_token_note), style = MaterialTheme.typography.bodySmall)
                 Button(
                     onClick = onConnect,
                     enabled = !isConnecting && canConnectOverLan,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (isConnecting) stringResource(R.string.status_connecting) else stringResource(R.string.connect_over_lan))
+                    ActionLabel(Icons.Outlined.Wifi,
+                        if (isConnecting) stringResource(R.string.status_connecting) else stringResource(R.string.connect_over_lan))
                 }
 
                 if (canConnectOverBle) {
@@ -138,7 +215,7 @@ fun ConnectScreen(
                     enabled = !isScanning,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(Icons.Filled.Bluetooth, contentDescription = null)
+                    Icon(Icons.Outlined.BluetoothSearching, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
                     Text(if (isScanning) stringResource(R.string.status_scanning) else stringResource(R.string.connect_search))
                 }

@@ -15,6 +15,26 @@
 #include "freertos/task.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdatomic.h>
+#include "esp_mac.h"
+
+void shu1_device_id(char *out, size_t size) {
+    uint8_t mac[6];
+    if (esp_efuse_mac_get_default(mac) != ESP_OK) {
+        if (size) out[0] = 0;
+        return;
+    }
+    snprintf(out, size, "%02X%02X%02X%02X%02X%02X",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static atomic_bool g_device_config_restart_required;
+void shu1_device_config_require_restart(void) {
+    atomic_store(&g_device_config_restart_required, true);
+}
+bool shu1_device_config_restart_required(void) {
+    return atomic_load(&g_device_config_restart_required);
+}
 
 static const char *TAG = "shu1_store";
 static const char *NS = "app_nvs";
@@ -113,7 +133,7 @@ esp_err_t shu1_settings_store_load_settings(shu1_settings_t *s) {
     if (nvs_get_i32(h, "vdoor_drop", &v) == ESP_OK) s->virtual_door_drop_c = v;
     if (nvs_get_i32(h, "vdoor_rate", &v) == ESP_OK) s->virtual_door_rate_c_per_min = v;
     if (nvs_get_i32(h, "vdoor_min", &v) == ESP_OK) s->virtual_door_min_base_temp_c = v;
-    if (nvs_get_i32(h, "vdoor_act", &v) == ESP_OK) s->virtual_door_action = v;
+    s->virtual_door_action = SHU1_VDOOR_ACTION_NOTIFY_ONLY; // Migrate old stop actions.
     if (nvs_get_i32(h, "health_t", &v) == ESP_OK) s->health_test_target_c = v;
     if (nvs_get_i32(h, "health_s", &v) == ESP_OK) s->health_test_duration_sec = v;
     if (nvs_get_i32(h, "warm_pred", &v) == ESP_OK) s->warmup_prediction_enabled = v != 0;

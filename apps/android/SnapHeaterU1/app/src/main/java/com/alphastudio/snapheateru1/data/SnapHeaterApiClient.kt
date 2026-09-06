@@ -14,12 +14,13 @@ import java.net.URL
 import org.json.JSONObject
 import org.json.JSONException
 
-class SnapHeaterApiClient(baseUrl: String, private val controlToken: String = "web") {
+class SnapHeaterApiClient(baseUrl: String, private val controlToken: String = "") {
     private val rootUrl = normalizeBaseUrl(baseUrl)
 
     fun health(): JSONObject = request("GET", "/api/health")
 
     fun status(): JSONObject = request("GET", "/api/status")
+    fun verifyAccess(): JSONObject = request("GET", "/api/v2/auth")
 
     fun postSettings(payload: JSONObject): JSONObject = request("POST", "/api/settings", payload)
 
@@ -33,7 +34,7 @@ class SnapHeaterApiClient(baseUrl: String, private val controlToken: String = "w
                 connectTimeout = 3000
                 readTimeout = 5000
                 setRequestProperty("Accept", "application/json")
-                if (method != "GET") setRequestProperty("X-DragonBreath-Auth", controlToken)
+                if (controlToken.isNotBlank()) setRequestProperty("X-DragonBreath-Auth", controlToken)
                 if (body != null) {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json")

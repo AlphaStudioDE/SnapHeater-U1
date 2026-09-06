@@ -1,5 +1,16 @@
 # Offline tests
 
+Before Python unittest discovery, run Android `gradlew testDebugUnitTest` in
+`apps/android/SnapHeaterU1`. This generates the real Kotlin command fixtures
+consumed by the firmware parser integration test. See
+[the app control contract](APP_CONTROL_CONTRACT.md).
+
+The current default configuration is a functional experimental tester build
+with actuator support enabled. Building/testing offline does not flash a device.
+See [tester build instructions](TESTER_BUILD.md) for isolated configuration.
+Set SHU1_TEST_CONFIG to build-panda-tester/config to run the control-loop
+simulation against its generated configuration.
+
 The full host suite currently uses Windows mutex stubs. Use Python 3, native
 Clang, and an activated ESP-IDF 5.3.5 environment with IDF_PATH set.
 Set CC to your clang executable if it is not on PATH.

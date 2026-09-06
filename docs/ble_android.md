@@ -85,6 +85,11 @@ off; a new lease is then issued to the new transport. Physical buttons always
 retain local stop/takeover authority. Moonraker is AUTO telemetry, not a direct
 settings writer.
 
+Phone disconnection does not cancel an accepted local job. At command-lease
+expiry, ownership becomes `local_job`; old tokens become invalid. Android
+recovers an expired heartbeat through a read-only status fetch, not by replaying
+a heating command. Panda connects to Moonraker directly over its own Wi-Fi.
+
 ## GATT service
 
 Private service UUID:
@@ -360,7 +365,7 @@ Compact BLE status includes:
 
 ## v1.1 Virtual Door / Open Lid Detection
 
-SnapHeater can infer probable chamber/top-cover opening from a sudden chamber temperature drop after print finish, during tempering, keep-warm or post-run cooldown.
+SnapHeater can infer probable chamber/top-cover opening from a sudden chamber temperature drop in every mode, including printing, preheat, drying, manual heating, tempering and idle cooldown. This is advisory only: it never stops a job or sets a heater fault. Sensor, overtemperature and zero-cross protections remain independent.
 
 Example command:
 
@@ -371,25 +376,28 @@ Example command:
   "virtual_door_drop_c": 4,
   "virtual_door_rate_c_per_min": 4,
   "virtual_door_min_base_temp": 35,
-  "virtual_door_action": 1
+  "virtual_door_action": 0
 }
 ```
 
 Action values:
 
 - `0`: notify only,
-- `1`: stop post-print conditioning,
-- `2`: stop heater/conditioning.
+- Legacy values `1` and `2` are normalized to notify-only, including saved settings.
 
 Status fields include `virtual_door_open`, `virtual_door_open_pending`, `virtual_door_last_drop_c` and `virtual_door_last_rate_c_per_min`.
 
 Android/local UI should show a notification when `virtual_door_open_pending=true`, then acknowledge with:
 
 ```json
-{"ack_virtual_door_open": true}
+{"virtual_door_ack": 61000}
 ```
 
-Clear the latched state with:
+Use the exact event timestamp from `virtual_door_detected_ms` (BLE: `vdoor_ms`) in this standalone authenticated/unlocked receipt. No control lease is required; an old receipt cannot clear a newer event. Compact BLE also includes `vdoor_enabled`, `vdoor`, `vdoor_pending` and `vdoor_drop`.
+
+The Android app displays an alert and posts a system notification when allowed. Delivery requires receiving telemetry: there is no always-running background service. The latest unacknowledged event survives phone disconnection in Panda RAM, not Panda reboot; multiple events coalesce to the latest. Default thresholds remain a 4 °C drop over a 60-second window, at least 4 °C/min, with baseline at least 35 °C. A drop is not proof of an open door.
+
+Legacy clients can clear the latched state with an ordinary authorized settings command:
 
 ```json
 {"clear_virtual_door_open": true}
@@ -406,3 +414,10 @@ The Android app should expose the following optional panels:
 - Print risk and start warning: `print_risk_enabled`, `start_print_warning_enabled`.
 - Recipes: `local_recipes_enabled`, `active_recipe_slot`, `active_recipe_name`.
 - Setup safety checklist: read `safety_score`, `setup_validation_passed`, `safety_message`.
+# Activation without manual arming
+
+Android submits the selected mode through the existing BLE command contract,
+including its lease/heartbeat requirements. No separate arm action is required.
+Firmware runtime gates remain authoritative. An idle `latch_ready=false`
+does not prevent submitting a work request. Faults and maintenance still block
+activation. Legacy disarm is unconditional OFF; legacy arm has no effect.

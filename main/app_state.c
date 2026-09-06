@@ -46,10 +46,12 @@ bool shu1_control_start_allowed(void) {
 bool shu1_control_schedule_allowed(void) {
     shu1_control_snapshot_t owner;
     shu1_control_snapshot(&owner);
-    return shu1_control_start_allowed() && owner.lease_active &&
-           !shu1_control_lease_expired();
+    return shu1_control_start_allowed() &&
+           (owner.owner == SHU1_CONTROL_LOCAL_JOB ||
+            (owner.lease_active && !shu1_control_lease_expired()));
 }
 bool shu1_control_maintenance_begin(void) {
+    // OTA keeps its stricter cold-sensor requirements below.
     shu1_settings_t st = shu1_state_get_settings();
     if (g_maintenance || st.work_on || st.scheduled_preheat_enabled ||
         st.preheat_running || st.drying_running || st.dryout_running ||
@@ -66,6 +68,17 @@ bool shu1_control_maintenance_begin(void) {
     return true;
 }
 void shu1_control_maintenance_end(void) { g_maintenance = false; }
+bool shu1_control_network_setup_begin(void) {
+    // Networking cannot change an active task; the thermal loop keeps running.
+    // Unlike OTA, Wi-Fi setup does not require a room colder than 30 C.
+    shu1_settings_t st = shu1_state_get_settings();
+    if (g_maintenance || st.work_on || st.scheduled_preheat_enabled ||
+        st.preheat_running || st.drying_running || st.dryout_running ||
+        st.health_test_running || st.keep_warm_active || st.pickup_active ||
+        shu1_control_outputs_busy()) return false;
+    g_maintenance = true;
+    return true;
+}
 void shu1_settings_stop(shu1_settings_t *st) {
     st->work_on = false;
     st->output_safety_latch_armed = false;
@@ -81,6 +94,14 @@ void shu1_settings_stop(shu1_settings_t *st) {
     st->tempering_start_ms = 0; st->tempering_end_ms = 0;
     st->heat_soak_phase = SHU1_HEAT_SOAK_IDLE;
     st->session_started_ms = 0;
+}
+
+void shu1_virtual_door_ack(int64_t detected_ms) {
+    shu1_settings_t st = shu1_state_get_settings();
+    if (detected_ms > 0 && st.virtual_door_detected_ms == detected_ms && st.virtual_door_open_pending) {
+        st.virtual_door_open_pending = false;
+        shu1_state_update_settings_command(&st);
+    }
 }
 
 void shu1_state_init(void) {

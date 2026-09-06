@@ -132,14 +132,12 @@ static void stop_all_user_cycles(bool emergency) {
 }
 
 static bool output_latch_allows_start(void) {
-    if (!shu1_control_start_allowed()) return false;
-    shu1_settings_t st = shu1_state_get_settings();
-    shu1_runtime_t rt = shu1_state_get_runtime();
-    if (!st.output_safety_latch_enabled) return true;
-    if (st.output_safety_latch_armed && rt.output_safety_latch_ready) return true;
-    set_notification(SHU1_NOTIFY_ACTION, "physical_start_blocked", "Physical start blocked: output safety latch is not ready");
-    shu1_event_log_add("warn", "physical_start_blocked", "physical start blocked because output safety latch is not armed/ready");
-    return false;
+    if (!shu1_control_start_allowed()) {
+        set_notification(SHU1_NOTIFY_ACTION, "physical_start_blocked", "Physical start blocked: fault or maintenance active");
+        shu1_event_log_add("warn", "physical_start_blocked", "physical start blocked by fault or maintenance");
+        return false;
+    }
+    return true;
 }
 
 static void start_auto_mode(void) {

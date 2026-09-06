@@ -383,7 +383,12 @@ Meaning:
 Remote manual (`POWER_ON`) start returns a random 32-character `lease_id`.
 The caller must renew that exact lease using authenticated
 `POST /api/v2/heartbeat` with `{"lease_id":"..."}`. The fixed deadline is five
-minutes; expiry turns heating off and persists a controller-link-loss fault.
+minutes. Expiry invalidates remote command authority and transfers an accepted
+running/scheduled job to the local firmware executor (`owner: local_job`).
+It does not stop the job or create a controller-link-loss fault. Local sensors,
+Moonraker readiness for AUTO, task deadlines and fault/OTA governors still apply.
+OFF is always available. After reconnecting, read current status before issuing
+a new revision-checked takeover command; never replay an old command.
 
 REST, BLE and the physical panel all remain usable. They do not write one active
 heat session concurrently:
@@ -470,7 +475,7 @@ Status fields added/clarified:
 
 ## v1.1 Virtual Door / Open Lid Detection
 
-SnapHeater can infer probable chamber/top-cover opening from a sudden chamber temperature drop after print finish, during tempering, keep-warm or post-run cooldown.
+SnapHeater can infer probable chamber/top-cover opening from a sudden chamber temperature drop in every mode, including printing, preheat, drying, manual heating, tempering and idle cooldown. This is advisory only: it never stops a job or sets a heater fault. Sensor, overtemperature and zero-cross protections remain independent.
 
 Example command:
 
@@ -481,25 +486,28 @@ Example command:
   "virtual_door_drop_c": 4,
   "virtual_door_rate_c_per_min": 4,
   "virtual_door_min_base_temp": 35,
-  "virtual_door_action": 1
+  "virtual_door_action": 0
 }
 ```
 
 Action values:
 
 - `0`: notify only,
-- `1`: stop post-print conditioning,
-- `2`: stop heater/conditioning.
+- Legacy values `1` and `2` are normalized to notify-only, including saved settings.
 
 Status fields include `virtual_door_open`, `virtual_door_open_pending`, `virtual_door_last_drop_c` and `virtual_door_last_rate_c_per_min`.
 
 Android/local UI should show a notification when `virtual_door_open_pending=true`, then acknowledge with:
 
 ```json
-{"ack_virtual_door_open": true}
+{"virtual_door_ack": 61000}
 ```
 
-Clear the latched state with:
+Use the exact event timestamp from `virtual_door_detected_ms` (BLE: `vdoor_ms`) in this standalone authenticated/unlocked receipt. No control lease is required; an old receipt cannot clear a newer event. Compact BLE also includes `vdoor_enabled`, `vdoor`, `vdoor_pending` and `vdoor_drop`.
+
+The Android app displays an alert and posts a system notification when allowed. Delivery requires receiving telemetry: there is no always-running background service. The latest unacknowledged event survives phone disconnection in Panda RAM, not Panda reboot; multiple events coalesce to the latest. Default thresholds remain a 4 °C drop over a 60-second window, at least 4 °C/min, with baseline at least 35 °C. A drop is not proof of an open door.
+
+Legacy clients can clear the latched state with an ordinary authorized settings command:
 
 ```json
 {"clear_virtual_door_open": true}
@@ -555,3 +563,11 @@ The following fields can be sent through `POST /api/settings` and BLE Control:
 ```
 
 The REST status response includes the corresponding runtime fields such as `warmup_eta_sec`, `heat_soak_ready`, `filter_life_pct`, `heater_wear_pct`, `airflow_warning_pending`, `print_risk_score`, `print_risk_message`, `safety_score`, and `safety_message`.
+# Activation without manual arming
+
+Submit the ordinary mode/work request using the existing lease and revision
+contract. No separate arm request or operator verification flags are needed.
+The firmware automatically applies runtime conditions before physical heating.
+Legacy `arm_output_safety_latch` is inert; `disarm_output_safety_latch` is
+unconditional OFF, including when mixed with start fields. A fault still rejects
+new work until cleared; clearing never resumes a stopped session.

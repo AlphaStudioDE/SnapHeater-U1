@@ -6,6 +6,12 @@
 
 package com.alphastudio.snapheateru1.ui.screens
 
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import com.alphastudio.snapheateru1.ui.components.ActionLabel
+import com.alphastudio.snapheateru1.ui.components.actionIcon
+import androidx.compose.material.icons.Icons
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -28,7 +34,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.alphastudio.snapheateru1.R
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
-import com.alphastudio.snapheateru1.ui.HomeLayoutStyle
 import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.components.SectionTitle
 import com.alphastudio.snapheateru1.ui.components.StatusRow
@@ -37,41 +42,21 @@ import com.alphastudio.snapheateru1.ui.theme.StatusColors
 @Composable
 fun SettingsScreen(
     snapshot: HeaterSnapshot,
-    homeLayoutStyle: HomeLayoutStyle,
-    onHomeLayoutStyle: (HomeLayoutStyle) -> Unit,
+    statusText: String,
+    busy: Boolean,
+    onBack: () -> Unit,
     onTarget: (Int) -> Unit,
     onSnapshotChange: (HeaterSnapshot) -> Unit,
+    onVirtualDoorDetectionChange: (Boolean) -> Unit,
     onApplySettings: (HeaterSnapshot) -> Unit,
+    onSchedule: (HeaterSnapshot) -> Unit,
+    restProvisionEnabled: Boolean,
+    onProvisionRest: (String) -> Unit,
 ) {
     ScreenColumn {
         SectionTitle(stringResource(R.string.settings_title), stringResource(R.string.settings_subtitle))
 
-        SettingsCard(stringResource(R.string.settings_home_layout)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                HomeLayoutStyle.entries.forEach { style ->
-                    if (style == homeLayoutStyle) {
-                        Button(
-                            onClick = { onHomeLayoutStyle(style) },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(style.label)
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = { onHomeLayoutStyle(style) },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(style.label)
-                        }
-                    }
-                }
-            }
-            Text(
-                stringResource(R.string.settings_home_layout_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        OutlinedButton(onClick = onBack) { ActionLabel(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.settings_title)) }
 
         Card(
             shape = RoundedCornerShape(8.dp),
@@ -84,14 +69,14 @@ fun SettingsScreen(
                 Text(stringResource(R.string.settings_temperature_target), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Text("${snapshot.targetC} C", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
                 Slider(
-                    value = snapshot.targetC.toFloat(),
+                    value = snapshot.targetC.coerceIn(30, 55).toFloat(),
                     onValueChange = { onTarget(it.toInt()) },
-                    valueRange = 30f..70f,
-                    steps = 39,
+                    valueRange = 30f..55f,
+                    steps = 24,
                 )
                 StatusRow(stringResource(R.string.label_material_profile), snapshot.material, valueColor = StatusColors.Normal)
                 StatusRow(stringResource(R.string.settings_active_recipe), snapshot.activeRecipeName)
-                StatusRow(stringResource(R.string.settings_max_ui_target), "70 C")
+                StatusRow(stringResource(R.string.settings_max_ui_target), "55 °C")
             }
         }
 
@@ -134,8 +119,9 @@ fun SettingsScreen(
         }
 
         SettingsCard(stringResource(R.string.settings_post_service)) {
+            com.alphastudio.snapheateru1.ui.components.RestAccessCard(restProvisionEnabled, onProvisionRest)
             ToggleRow(stringResource(R.string.settings_virtual_door), snapshot.virtualDoorDetectionEnabled) {
-                onSnapshotChange(snapshot.copy(virtualDoorDetectionEnabled = it))
+                onVirtualDoorDetectionChange(it)
             }
             ToggleRow(stringResource(R.string.settings_airflow_detection), snapshot.airflowDetectionEnabled) {
                 onSnapshotChange(snapshot.copy(airflowDetectionEnabled = it))
@@ -151,6 +137,20 @@ fun SettingsScreen(
             }
             ToggleRow(stringResource(R.string.settings_scheduled_preheat), snapshot.scheduledPreheatEnabled) {
                 onSnapshotChange(snapshot.copy(scheduledPreheatEnabled = it))
+            }
+            if (snapshot.scheduledPreheatEnabled) {
+                Text(stringResource(R.string.schedule_delay, snapshot.scheduledPreheatDelayMin))
+                Slider(value = snapshot.scheduledPreheatDelayMin.coerceIn(1, 1440).toFloat(),
+                    onValueChange = { onSnapshotChange(snapshot.copy(scheduledPreheatDelayMin = it.toInt())) }, valueRange = 1f..1440f)
+                Text(stringResource(R.string.schedule_target, snapshot.scheduledPreheatTargetC))
+                Slider(value = snapshot.scheduledPreheatTargetC.coerceIn(30, 55).toFloat(),
+                    onValueChange = { onSnapshotChange(snapshot.copy(scheduledPreheatTargetC = it.toInt())) }, valueRange = 30f..55f, steps = 24)
+                Text(stringResource(R.string.schedule_hold, snapshot.scheduledPreheatHoldMin))
+                Slider(value = snapshot.scheduledPreheatHoldMin.coerceIn(1, 240).toFloat(),
+                    onValueChange = { onSnapshotChange(snapshot.copy(scheduledPreheatHoldMin = it.toInt())) }, valueRange = 1f..240f)
+            }
+            OutlinedButton(enabled = !busy, onClick = { onSchedule(snapshot) }) {
+                ActionLabel(Icons.Outlined.Schedule, stringResource(if (snapshot.scheduledPreheatEnabled) R.string.schedule_confirm else R.string.schedule_cancel))
             }
         }
 
@@ -184,11 +184,13 @@ fun SettingsScreen(
         }
 
         Button(
+            enabled = !busy,
             onClick = { onApplySettings(snapshot) },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(stringResource(R.string.settings_apply))
+            ActionLabel(Icons.Outlined.Check, stringResource(R.string.settings_apply))
         }
+        Text(statusText, style = MaterialTheme.typography.bodySmall)
     }
 }
 

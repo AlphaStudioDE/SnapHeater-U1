@@ -6,6 +6,11 @@
 
 package com.alphastudio.snapheateru1.ui
 
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import com.alphastudio.snapheateru1.ui.components.ActionLabel
+import com.alphastudio.snapheateru1.ui.components.actionIcon
+
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -26,6 +31,8 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -54,6 +61,9 @@ import com.alphastudio.snapheateru1.data.FirmwareSnapHeaterRepository
 import com.alphastudio.snapheateru1.data.SnapHeaterApiClient
 import com.alphastudio.snapheateru1.data.normalizeBaseUrl
 import com.alphastudio.snapheateru1.model.AppMode
+import com.alphastudio.snapheateru1.model.requiresPrinter
+import com.alphastudio.snapheateru1.ui.screens.PrinterSetupScreen
+import com.alphastudio.snapheateru1.ui.screens.WifiSetupScreen
 import com.alphastudio.snapheateru1.model.AppSession
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 import com.alphastudio.snapheateru1.ui.screens.ConnectScreen
@@ -62,6 +72,7 @@ import com.alphastudio.snapheateru1.ui.screens.DiagnosticsScreen
 import com.alphastudio.snapheateru1.ui.screens.ModesScreen
 import com.alphastudio.snapheateru1.ui.screens.SafetyScreen
 import com.alphastudio.snapheateru1.ui.screens.SettingsScreen
+import com.alphastudio.snapheateru1.ui.components.ScreenColumn
 import com.alphastudio.snapheateru1.ui.theme.SnapHeaterTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -71,56 +82,143 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SnapHeaterApp() {
+    var visualPreview by rememberSaveable { mutableStateOf(false) }
+    if (visualPreview) {
+        com.alphastudio.snapheateru1.ui.screens.VisualPreviewScreen(onExit = { visualPreview = false })
+        return // No repository, scan or polling effect exists in this branch.
+    }
     val context = LocalContext.current
+    val deviceContext = context.applicationContext
+    val credentials = remember(deviceContext) { com.alphastudio.snapheateru1.data.RestCredentials(deviceContext) }
+    var restToken by remember { mutableStateOf("") }
+    fun restRepository(address: String): FirmwareSnapHeaterRepository =
+        FirmwareSnapHeaterRepository(SnapHeaterApiClient(address, credentials.get(normalizeBaseUrl(address))))
     val preferences = remember(context) {
         context.getSharedPreferences("snapheater_u1", Context.MODE_PRIVATE)
     }
     var appSessionName by rememberSaveable { mutableStateOf(AppSession.Connect.name) }
     var selectedTabName by rememberSaveable { mutableStateOf(AppTab.Dashboard.name) }
-    var homeLayoutStyleName by rememberSaveable {
-        mutableStateOf(preferences.getString("home_layout_style", HomeLayoutStyle.Default.name) ?: HomeLayoutStyle.Default.name)
-    }
     var deviceAddress by rememberSaveable { mutableStateOf(preferences.getString("device_address", "") ?: "") }
+    var savedDevices by remember(deviceContext) {
+        mutableStateOf(preferences.getStringSet("confirmed_devices", emptySet()).orEmpty().sorted())
+    }
     var connectedBaseUrl by rememberSaveable { mutableStateOf("") }
     var connectionStatus by rememberSaveable { mutableStateOf(context.getString(R.string.status_ready)) }
     var isConnecting by rememberSaveable { mutableStateOf(false) }
     var isScanning by rememberSaveable { mutableStateOf(false) }
+    var advancedSettings by rememberSaveable { mutableStateOf(false) }
+    var commandPending by remember { mutableStateOf(false) }
+    var stopPending by remember { mutableStateOf(false) }
+    var connectionHealthy by remember { mutableStateOf(false) }
+    var printerWizard by rememberSaveable { mutableStateOf(true) }
+    var printerSkipped by rememberSaveable { mutableStateOf(true) }
+    var printerConfigSaved by remember { mutableStateOf(false) }
+    var printerSetupStatus by remember { mutableStateOf("") }
+    var wifiStepComplete by rememberSaveable { mutableStateOf(false) }
+    var wifiSetupError by remember { mutableStateOf("") }
     var scanMessage by rememberSaveable { mutableStateOf(context.getString(R.string.status_ready)) }
     var snapshot by rememberSaveable(stateSaver = HeaterSnapshotSaver) {
         mutableStateOf(HeaterSnapshot(ble = "Disconnected"))
     }
     val appSession = AppSession.entries.firstOrNull { it.name == appSessionName } ?: AppSession.Connect
     val selectedTab = AppTab.valueOf(selectedTabName)
-    val homeLayoutStyle = HomeLayoutStyle.fromPreference(homeLayoutStyleName)
     val modeLabel = stringResource(snapshot.mode.labelRes())
-    val heatingAllowed = snapshot.heaterOutputBuildEnabled &&
-        snapshot.outputSafetyLatchReady
+    val heatingAllowed = connectionHealthy && !commandPending && !stopPending && !snapshot.wifi.busy && snapshot.heaterOutputBuildEnabled
     val safetyWarning = when {
+        !connectionHealthy -> stringResource(R.string.daily_connection_warning)
+        stopPending -> stringResource(R.string.heating_stopping)
+        commandPending -> stringResource(R.string.common_pending)
+        snapshot.wifi.busy -> stringResource(R.string.wifi_connecting)
         !snapshot.heaterOutputBuildEnabled -> stringResource(R.string.modes_block_build)
-        !snapshot.outputSafetyLatchReady -> stringResource(R.string.modes_block_latch)
         else -> stringResource(R.string.modes_available)
     }
     val scope = rememberCoroutineScope()
-    val bleScanner = remember(context) { SnapHeaterBleScanner(context.applicationContext) }
-    val firmwareRepository = remember(context, connectedBaseUrl) {
+    var settingsDraft by remember(advancedSettings, connectedBaseUrl) { mutableStateOf(snapshot) }
+    val bleScanner = remember(deviceContext) { SnapHeaterBleScanner(deviceContext) }
+    val firmwareRepository = remember(deviceContext, connectedBaseUrl) {
         when {
             connectedBaseUrl.startsWith("ble://", ignoreCase = true) ->
-                BleSnapHeaterRepository(context.applicationContext, connectedBaseUrl.removePrefix("ble://"))
+                BleSnapHeaterRepository(deviceContext, connectedBaseUrl.removePrefix("ble://"))
             connectedBaseUrl.isNotBlank() ->
-                FirmwareSnapHeaterRepository(SnapHeaterApiClient(connectedBaseUrl))
+                restRepository(connectedBaseUrl)
             else -> null
         }
     }
 
+    var savedNamesRevision by remember { mutableStateOf(0) }
+    fun deviceNameKey(address: String): String =
+        "device_name_" + preferences.getString("device_id_$address", address)
+    val savedDeviceNames = remember(savedDevices, savedNamesRevision) {
+        savedDevices.associateWith { address ->
+            preferences.getString(deviceNameKey(address), null)
+                ?: preferences.getString("device_id_$address", null)?.let { "SH_${it.takeLast(4)}" }
+                ?: "SH_?"
+        }
+    }
+
+    fun rememberConnectedDevice(address: String, deviceId: String) {
+        val canonical = if (address.startsWith("ble://", ignoreCase = true))
+            "ble://" + address.substringAfter("://").uppercase()
+        else normalizeBaseUrl(address)
+        savedDevices = (savedDevices + canonical).distinct().sorted()
+        preferences.edit().putStringSet("confirmed_devices", savedDevices.toSet()).apply()
+        if (deviceId.matches(Regex("[A-Fa-f0-9]{12}"))) {
+            val stableId = deviceId.uppercase()
+            val previousId = preferences.getString("device_id_$canonical", null)
+            val oldName = if (previousId == null || previousId == stableId)
+                preferences.getString(deviceNameKey(canonical), null) else null
+            val edit = preferences.edit().putString("device_id_$canonical", stableId)
+            if (oldName != null && !preferences.contains("device_name_$stableId"))
+                edit.putString("device_name_$stableId", oldName)
+            edit.apply()
+        }
+        savedNamesRevision++
+        printerWizard = true
+        wifiStepComplete = false
+        wifiSetupError = ""
+        printerSkipped = true
+        printerConfigSaved = false
+        printerSetupStatus = ""
+    }
+
+    fun connectSavedDevice(address: String) {
+        if (isConnecting || isScanning) return
+        deviceAddress = address
+        isConnecting = true
+        connectionHealthy = false
+        connectionStatus = context.getString(R.string.status_connecting)
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    if (address.startsWith("ble://"))
+                        BleSnapHeaterRepository(deviceContext, address.removePrefix("ble://")).snapshot()
+                    else restRepository(address).checkHealth()
+                }
+            }.onSuccess { latest ->
+                rememberConnectedDevice(address, latest.deviceId)
+                connectedBaseUrl = address
+                snapshot = latest
+                connectionHealthy = true
+                preferences.edit().putString("device_address", address).apply()
+                connectionStatus = context.getString(R.string.status_connected_to, address)
+                appSessionName = AppSession.Connected.name
+            }.onFailure { error ->
+                connectionStatus = context.getString(R.string.status_connection_failed, error.shortMessage())
+            }
+            isConnecting = false
+        }
+    }
+
     fun requestSafeStop() {
+        if (stopPending) return
         val pendingStop = snapshot.copy(
             mode = AppMode.SafeStop,
             lastConfirmedSettings = context.getString(R.string.common_pending),
         )
-        snapshot = pendingStop
-        selectedTabName = AppTab.Modes.name
+        connectionStatus = context.getString(R.string.heating_stopping)
         val repository = firmwareRepository
         if (repository != null) {
+            stopPending = true
             scope.launch {
                 runCatching {
                     withContext(Dispatchers.IO) { repository.applySettings(pendingStop) }
@@ -129,8 +227,8 @@ fun SnapHeaterApp() {
                     connectionStatus = context.getString(R.string.status_settings_confirmed)
                 }.onFailure { error ->
                     connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
-                    snapshot = pendingStop
                 }
+                stopPending = false
             }
         }
     }
@@ -174,16 +272,56 @@ fun SnapHeaterApp() {
         }
     }
 
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(appSessionName) {
+        if (appSession == AppSession.Connected && android.os.Build.VERSION.SDK_INT >= 33 &&
+            !preferences.getBoolean("notification_permission_requested", false)) {
+            preferences.edit().putBoolean("notification_permission_requested", true).apply()
+            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    val alertId = snapshot.virtualDoorDetectedMs
+    val alertDevice = snapshot.deviceId.ifBlank { connectedBaseUrl }
+    val alertMessage = stringResource(R.string.vdoor_message, savedDeviceNames[connectedBaseUrl] ?: "SH_${snapshot.deviceId.takeLast(4)}", snapshot.virtualDoorDropC)
+    var postedAlert by remember(connectedBaseUrl) { mutableStateOf(0L) }
+    var hiddenAlert by remember(connectedBaseUrl) { mutableStateOf(0L) }
+    LaunchedEffect(alertDevice, alertId, snapshot.virtualDoorPending) {
+        if (appSession == AppSession.Connected && snapshot.virtualDoorPending && alertId > 0 && postedAlert != alertId) {
+            postVirtualDoorNotification(context, alertDevice, alertMessage)
+            postedAlert = alertId
+        }
+    }
+    if (appSession == AppSession.Connected && snapshot.virtualDoorPending && alertId > 0 && hiddenAlert != alertId) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { hiddenAlert = alertId },
+            title = { Text(stringResource(R.string.vdoor_title)) },
+            text = { Text(alertMessage) },
+            confirmButton = { TextButton(enabled = connectionHealthy && !commandPending && !stopPending, onClick = {
+                val repository = firmwareRepository ?: return@TextButton
+                commandPending = true
+                scope.launch {
+                    runCatching { withContext(Dispatchers.IO) { repository.acknowledgeVirtualDoor(alertId) } }
+                        .onSuccess { if (snapshot.virtualDoorDetectedMs == alertId) snapshot = snapshot.copy(virtualDoorPending = false) }
+                        .onFailure { connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                    commandPending = false
+                }
+            }) { Text(stringResource(R.string.vdoor_ack)) } },
+        )
+    }
+
     LaunchedEffect(appSessionName, connectedBaseUrl) {
         val repository = firmwareRepository ?: return@LaunchedEffect
         if (appSession != AppSession.Connected) return@LaunchedEffect
         while (true) {
+            if (commandPending || stopPending) { delay(300); continue }
             runCatching {
                 withContext(Dispatchers.IO) { repository.snapshot() }
             }.onSuccess { latest ->
+                connectionHealthy = true
                 snapshot = latest.copy(lastConfirmedSettings = snapshot.lastConfirmedSettings)
                 connectionStatus = context.getString(R.string.status_connected_to, connectedBaseUrl)
             }.onFailure { error ->
+                connectionHealthy = false
                 connectionStatus = context.getString(R.string.status_connection_lost, error.shortMessage())
                 snapshot = snapshot.copy(ble = "LAN error")
             }
@@ -194,7 +332,20 @@ fun SnapHeaterApp() {
     if (appSession == AppSession.Connect) {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             ConnectScreen(
+                savedDevices = savedDevices,
+                savedDeviceNames = savedDeviceNames,
+                onRenameDevice = { address, name ->
+                    val edit = preferences.edit()
+                    if (name.isBlank()) edit.remove(deviceNameKey(address))
+                    else edit.putString(deviceNameKey(address), name.trim().take(40))
+                    edit.apply()
+                    savedNamesRevision++
+                },
+                onSavedDevice = { connectSavedDevice(it) },
+                onPreview = { visualPreview = true },
                 deviceAddress = deviceAddress,
+                restToken = restToken,
+                onRestToken = { restToken = it.take(64) },
                 connectionStatus = connectionStatus,
                 isConnecting = isConnecting,
                 isScanning = isScanning,
@@ -212,12 +363,19 @@ fun SnapHeaterApp() {
                     scope.launch {
                         runCatching {
                             withContext(Dispatchers.IO) {
-                                FirmwareSnapHeaterRepository(SnapHeaterApiClient(baseUrl)).checkHealth()
+                                val candidate = restToken.ifBlank { credentials.get(baseUrl) }
+                                require(candidate.length in 16..64) { context.getString(R.string.rest_token_note) }
+                                val verified = FirmwareSnapHeaterRepository(SnapHeaterApiClient(baseUrl, candidate)).checkHealth()
+                                credentials.save(baseUrl, candidate)
+                                verified
                             }
                         }.onSuccess { latest ->
                             connectedBaseUrl = baseUrl
+                            restToken = ""
+                            rememberConnectedDevice(baseUrl, latest.deviceId)
                             preferences.edit().putString("device_address", baseUrl).apply()
                             snapshot = latest
+                            connectionHealthy = true
                             connectionStatus = context.getString(R.string.status_connected_to, baseUrl)
                             appSessionName = AppSession.Connected.name
                         }.onFailure { error ->
@@ -237,8 +395,10 @@ fun SnapHeaterApp() {
                             }
                         }.onSuccess { latest ->
                             connectedBaseUrl = "ble://$bleAddress"
+                            rememberConnectedDevice("ble://$bleAddress", latest.deviceId)
                             preferences.edit().putString("ble_device_address", bleAddress).apply()
                             snapshot = latest
+                            connectionHealthy = true
                             connectionStatus = context.getString(R.string.status_connected_to, "BLE $bleAddress")
                             appSessionName = AppSession.Connected.name
                         }.onFailure { error ->
@@ -259,13 +419,111 @@ fun SnapHeaterApp() {
         return
     }
 
+    val printerAllowed = !printerSkipped && connectionHealthy && snapshot.printerDataReady
+    if (printerWizard) {
+        if (!wifiStepComplete || !snapshot.wifi.connected || !connectionHealthy) {
+            WifiSetupScreen(
+                wifi = snapshot.wifi,
+                ble = connectedBaseUrl.startsWith("ble://"),
+                healthy = connectionHealthy,
+                pending = commandPending || stopPending,
+                idle = snapshot.mode == AppMode.SafeStop && !snapshot.fanOn,
+                error = wifiSetupError,
+                onRequest = { action, ssid, password ->
+                    val repository = firmwareRepository
+                    if (repository != null && connectedBaseUrl.startsWith("ble://") &&
+                        connectionHealthy && !commandPending && !stopPending && !snapshot.wifi.busy &&
+                        snapshot.mode == AppMode.SafeStop && !snapshot.fanOn) {
+                        commandPending = true
+                        wifiSetupError = ""
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) { repository.setupWifi(action, ssid, password) }
+                            }.onSuccess { snapshot = it }.onFailure {
+                                wifiSetupError = context.getString(R.string.wifi_request_failed)
+                            }
+                            commandPending = false
+                        }
+                    }
+                },
+                onContinue = {
+                    if (connectionHealthy && snapshot.wifi.connected && !snapshot.wifi.busy &&
+                        wifiSetupError.isBlank()) wifiStepComplete = true
+                },
+                onSkip = { printerSkipped = true; printerWizard = false },
+                onReconnect = {
+                    appSessionName = AppSession.Connect.name
+                    connectedBaseUrl = ""
+                    connectionHealthy = false
+                    wifiSetupError = ""
+                },
+            )
+            return
+        }
+        PrinterSetupScreen(
+            pandaIp = snapshot.wifi.ip,
+            initialHost = preferences.getString("printer_host_${snapshot.deviceId.ifBlank { connectedBaseUrl }}", "") ?: "",
+            initialPort = preferences.getInt("printer_port_${snapshot.deviceId.ifBlank { connectedBaseUrl }}", 7125),
+            ready = connectionHealthy && snapshot.printerDataReady,
+            busy = commandPending || stopPending,
+            idle = connectionHealthy && snapshot.mode == AppMode.SafeStop && !snapshot.fanOn,
+            saved = printerConfigSaved,
+            status = printerSetupStatus,
+            onSave = { host, port, ssid, password ->
+                val repository = firmwareRepository
+                if (repository != null && !commandPending && !stopPending &&
+                    connectionHealthy && snapshot.mode == AppMode.SafeStop && !snapshot.fanOn) {
+                    commandPending = true
+                    scope.launch {
+                        runCatching {
+                            withContext(Dispatchers.IO) { repository.configurePrinter(host, port, ssid, password) }
+                        }.onSuccess {
+                            snapshot = it
+                            printerConfigSaved = true
+                            preferences.edit()
+                                .putString("printer_host_${snapshot.deviceId.ifBlank { connectedBaseUrl }}", host)
+                                .putInt("printer_port_${snapshot.deviceId.ifBlank { connectedBaseUrl }}", port)
+                                .apply()
+                            printerSkipped = true
+                            printerSetupStatus = context.getString(R.string.wizard_restart)
+                        }.onFailure {
+                            printerSetupStatus = context.getString(R.string.wizard_save_failed)
+                        }
+                        commandPending = false
+                    }
+                }
+            },
+            onContinue = {
+                if (connectionHealthy && snapshot.printerDataReady && !printerConfigSaved) {
+                    printerSkipped = false
+                    printerWizard = false
+                }
+            },
+            onSkip = { printerSkipped = true; printerWizard = false },
+            onReconnect = {
+                appSessionName = AppSession.Connect.name
+                connectedBaseUrl = ""
+                connectionHealthy = false
+                printerConfigSaved = false
+            },
+        )
+        return
+    }
+
     SnapHeaterScaffold(
         selectedTab = selectedTab,
         snapshot = snapshot,
         modeLabel = modeLabel,
         connectionStatus = connectionStatus,
-        onTab = { selectedTabName = it.name },
+        onSafeStop = { requestSafeStop() },
+        onTab = {
+            selectedTabName = it.name
+            if (it == AppTab.Settings) advancedSettings = false
+        },
         onReconnect = {
+            printerWizard = true
+            printerSkipped = true
+            printerConfigSaved = false
             appSessionName = AppSession.Connect.name
             selectedTabName = AppTab.Dashboard.name
             connectedBaseUrl = ""
@@ -275,16 +533,20 @@ fun SnapHeaterApp() {
     ) { tab ->
         when (tab) {
             AppTab.Dashboard -> DashboardScreen(
+                stopPending = stopPending,
                 snapshot = snapshot,
-                homeLayoutStyle = homeLayoutStyle,
+                telemetryFresh = connectionHealthy,
                 onStart = { selectedTabName = AppTab.Modes.name },
                 onSafeStop = { requestSafeStop() },
             )
             AppTab.Modes -> ModesScreen(
+                printerAllowed = printerAllowed,
+                onPrinterSetup = { printerWizard = true },
                 snapshot = snapshot,
                 heatingAllowed = heatingAllowed,
                 safetyWarning = safetyWarning,
                 onMode = { mode ->
+                    if (mode.requiresPrinter() && !printerAllowed) return@ModesScreen
                     if (mode == AppMode.SafeStop) {
                         requestSafeStop()
                     } else {
@@ -294,9 +556,10 @@ fun SnapHeaterApp() {
                         )
                     }
                 },
-                onSnapshotChange = { updated -> snapshot = updated },
                 onConfirmSettings = { confirmed ->
-                    snapshot = confirmed
+                    if (confirmed.mode.requiresPrinter() && !printerAllowed) return@ModesScreen
+                    commandPending = true
+                    connectionStatus = context.getString(R.string.common_pending)
                     val repository = firmwareRepository
                     if (repository != null) {
                         scope.launch {
@@ -307,9 +570,11 @@ fun SnapHeaterApp() {
                                 connectionStatus = context.getString(R.string.status_settings_confirmed)
                             }.onFailure { error ->
                                 connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
-                                snapshot = confirmed.copy(lastConfirmedSettings = context.getString(R.string.common_pending))
                             }
+                            commandPending = false
                         }
+                    } else {
+                        commandPending = false
                     }
                 },
             )
@@ -336,32 +601,96 @@ fun SnapHeaterApp() {
                 },
             )
             AppTab.Diagnostics -> DiagnosticsScreen(snapshot)
-            AppTab.Settings -> SettingsScreen(
-                snapshot = snapshot,
-                homeLayoutStyle = homeLayoutStyle,
-                onHomeLayoutStyle = { style ->
-                    homeLayoutStyleName = style.name
-                    preferences.edit().putString("home_layout_style", style.name).apply()
+            AppTab.Settings -> if (!advancedSettings) {
+                ScreenColumn {
+                    Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineMedium)
+                    Text(stringResource(R.string.daily_settings_intro))
+                    LanguagePicker()
+                    Button(onClick = { selectedTabName = AppTab.Safety.name }) {
+                        ActionLabel(Icons.Outlined.Shield, stringResource(R.string.snapheater_safety))
+                    }
+                    TextButton(onClick = { selectedTabName = AppTab.Diagnostics.name }) {
+                        ActionLabel(Icons.Outlined.MonitorHeart, stringResource(R.string.tab_diag))
+                    }
+                    TextButton(onClick = { advancedSettings = true }) {
+                        ActionLabel(Icons.Outlined.Tune, stringResource(R.string.daily_advanced))
+                    }
+                }
+            } else SettingsScreen(
+                snapshot = settingsDraft,
+                statusText = connectionStatus,
+                busy = commandPending || stopPending,
+                onBack = { advancedSettings = false },
+                onTarget = { target -> settingsDraft = settingsDraft.copy(targetC = target) },
+                onSnapshotChange = { updated -> settingsDraft = updated },
+                onVirtualDoorDetectionChange = { enabled ->
+                    val repository = firmwareRepository
+                    if (repository != null && connectionHealthy && !commandPending && !stopPending) {
+                        commandPending = true
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { repository.setVirtualDoorDetection(enabled) } }
+                                .onSuccess {
+                                    snapshot = snapshot.copy(virtualDoorDetectionEnabled = it.virtualDoorDetectionEnabled)
+                                    settingsDraft = settingsDraft.copy(virtualDoorDetectionEnabled = it.virtualDoorDetectionEnabled)
+                                }
+                                .onFailure { connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                            commandPending = false
+                        }
+                    }
                 },
-                onTarget = { target -> snapshot = snapshot.copy(targetC = target) },
-                onSnapshotChange = { updated -> snapshot = updated },
                 onApplySettings = { updated ->
-                    snapshot = updated.copy(lastConfirmedSettings = context.getString(R.string.status_applying_settings))
+                    if (!connectionHealthy || commandPending || stopPending) return@SettingsScreen
+                    commandPending = true
                     val repository = firmwareRepository
                     if (repository != null) {
                         scope.launch {
                             runCatching {
-                                withContext(Dispatchers.IO) { repository.applySettings(updated) }
+                                withContext(Dispatchers.IO) { repository.savePreferences(updated) }
                             }.onSuccess { latest ->
-                                snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.status_settings_applied))
+                                if (!stopPending) snapshot = latest.copy(lastConfirmedSettings = context.getString(R.string.status_settings_applied))
+                                settingsDraft = latest
                                 connectionStatus = context.getString(R.string.status_settings_applied)
                             }.onFailure { error ->
                                 connectionStatus = context.getString(R.string.status_settings_failed, error.shortMessage())
-                                snapshot = updated.copy(lastConfirmedSettings = context.getString(R.string.status_settings_pending))
                             }
+                            commandPending = false
                         }
                     } else {
+                        commandPending = false
                         appSessionName = AppSession.Connect.name
+                    }
+                },
+                onSchedule = { planned ->
+                    val repository = firmwareRepository
+                    if (repository != null && connectionHealthy && !commandPending && !stopPending &&
+                        (snapshot.mode == AppMode.SafeStop || !planned.scheduledPreheatEnabled)) {
+                        commandPending = true
+                        scope.launch {
+                            runCatching { withContext(Dispatchers.IO) { repository.schedulePreheat(planned) } }
+                                .onSuccess { latest -> if (!stopPending) snapshot = latest; settingsDraft = latest }
+                                .onFailure { connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                            commandPending = false
+                        }
+                    } else connectionStatus = context.getString(R.string.schedule_stop_first)
+                },
+                restProvisionEnabled = connectedBaseUrl.startsWith("ble://") && connectionHealthy &&
+                    snapshot.wifi.connected && snapshot.mode == AppMode.SafeStop && !commandPending && !stopPending,
+                onProvisionRest = { token ->
+                    val repository = firmwareRepository
+                    val ip = snapshot.wifi.ip
+                    if (repository != null && !commandPending && !stopPending && ip.isNotBlank()) {
+                        commandPending = true
+                        scope.launch {
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    repository.provisionRestToken(token)
+                                    credentials.save(normalizeBaseUrl(ip), token)
+                                    restRepository(normalizeBaseUrl(ip)).checkHealth()
+                                }
+                            }.onSuccess { connectionStatus = context.getString(R.string.rest_verified) }
+                                .onFailure { connectionStatus = context.getString(R.string.status_settings_failed, it.shortMessage()) }
+                            commandPending = false
+                        }
                     }
                 },
             )
@@ -378,6 +707,7 @@ private fun SnapHeaterScaffold(
     snapshot: HeaterSnapshot,
     modeLabel: String,
     connectionStatus: String,
+    onSafeStop: () -> Unit,
     onTab: (AppTab) -> Unit,
     onReconnect: () -> Unit,
     content: @Composable (AppTab) -> Unit,
@@ -389,17 +719,18 @@ private fun SnapHeaterScaffold(
                     Column {
                         Text(stringResource(R.string.app_name), fontWeight = FontWeight.Bold)
                         Text(
-                            "${snapshot.ble} / $modeLabel / $connectionStatus",
+                            connectionStatus,
                             fontSize = 13.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
                 },
                 actions = {
+                    TextButton(onClick = onSafeStop) { ActionLabel(Icons.Outlined.PowerSettingsNew, stringResource(R.string.daily_stop)) }
                     IconButton(onClick = onReconnect) {
-                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_change_device))
+                        Icon(Icons.Outlined.PhonelinkSetup, contentDescription = stringResource(R.string.action_change_device))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -414,9 +745,10 @@ private fun SnapHeaterScaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 tonalElevation = 0.dp,
             ) {
-                AppTab.entries.forEach { tab ->
+                listOf(AppTab.Dashboard, AppTab.Modes, AppTab.Settings).forEach { tab ->
                     NavigationBarItem(
-                        selected = selectedTab == tab,
+                        selected = selectedTab == tab || (tab == AppTab.Settings &&
+                            selectedTab in listOf(AppTab.Safety, AppTab.Diagnostics)),
                         onClick = { onTab(tab) },
                         icon = { Icon(tab.icon, contentDescription = stringResource(tab.labelRes)) },
                         label = { Text(stringResource(tab.labelRes)) },

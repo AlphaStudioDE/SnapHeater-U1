@@ -10,14 +10,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.alphastudio.snapheateru1.ui.SnapHeaterApp
+import com.alphastudio.snapheateru1.ui.AppLanguageProvider
 import com.alphastudio.snapheateru1.ui.theme.SnapHeaterTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            SnapHeaterTheme {
-                SnapHeaterApp()
+            AppLanguageProvider(this) {
+                SnapHeaterTheme {
+                    SnapHeaterApp()
+                }
             }
         }
     }

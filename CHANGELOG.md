@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-09-06 — Android and autonomous Panda integration
+
+- Refreshed localized Android UI, mode icons, app artwork and isolated preview.
+- Added saved devices/names, Wi-Fi provisioning with bounded error reporting,
+  printer discovery and printer-dependent mode gating.
+- Accepted jobs continue locally after phone disconnection; safety limits remain.
+- Added all-mode advisory virtual-door notifications and timestamped receipts.
+- Unified REST/BLE activation and settings payloads; fixed AUTO cancellation,
+  preheat/drying starts, exact drying duration and settings writes while OFF.
+- Added standalone tempering, scheduler controls and encrypted Android storage
+  for BLE-provisioned REST credentials with read-only access verification.
+- Verification: 58 Python tests, Kotlin payload test, real-mutex safety host
+  test, Android build and ESP-IDF tester build passed locally.
+- No energized hardware qualification or new binary release is claimed.
+
 ## September 2026 development update
 
 - Hardened shared control arbitration, unconditional OFF, leases and BLE heartbeats.

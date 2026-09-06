@@ -13,6 +13,7 @@ typedef enum {
     SHU1_CONTROL_REST,
     SHU1_CONTROL_BLE,
     SHU1_CONTROL_PHYSICAL,
+    SHU1_CONTROL_LOCAL_JOB,
 } shu1_control_source_t;
 
 typedef enum {

@@ -1,5 +1,11 @@
 # SnapHeater U1 Feature Matrix
 
+> Historical planning matrix: the rows below are not a current completion claim.
+> See [current implementation](docs/CURRENT_IMPLEMENTATION.md) for verified
+> software work and explicit unfinished features. In particular, heater support
+> is enabled in tester defaults, Android has real transports, production demo
+> was removed, and firmware OTA is implemented but not hardware-qualified.
+
 This matrix tracks the project skeleton status.  It is intentionally honest: a
 feature can already exist in the firmware architecture/API while still needing
 build fixes, PCB verification, mobile implementation or real printer testing.

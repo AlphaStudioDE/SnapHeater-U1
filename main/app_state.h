@@ -410,8 +410,11 @@ bool shu1_control_start_allowed(void);
 bool shu1_control_outputs_busy(void);
 bool shu1_control_schedule_allowed(void);
 bool shu1_control_maintenance_begin(void);
+bool shu1_control_network_setup_begin(void);
 void shu1_control_maintenance_end(void);
 void shu1_settings_stop(shu1_settings_t *settings);
+// Policy guard required. An older receipt cannot clear a newer alert.
+void shu1_virtual_door_ack(int64_t detected_ms);
 void shu1_state_init(void);
 SemaphoreHandle_t shu1_state_mutex(void);
 void shu1_state_get(shu1_state_t *out);

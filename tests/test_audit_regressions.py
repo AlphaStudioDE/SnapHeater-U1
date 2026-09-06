@@ -285,6 +285,10 @@ int main(void) {
 #include "cJSON.h"
 static shu1_state_t snapshot;
 static bool g_ble_unlocked, g_ble_lease_proven;
+static bool config_pending;
+bool shu1_device_config_restart_required(void) {return config_pending;}
+void shu1_device_id(char *out, size_t size) {snprintf(out,size,"AABBCCDDA3F2");}
+bool shu1_wifi_status_json(cJSON *root) {return true;}
 void shu1_state_get(shu1_state_t *out) {*out=snapshot;}
 int64_t esp_timer_get_time(void) {return 1000000;}
 void shu1_control_snapshot(shu1_control_snapshot_t *out) {memset(out,0,sizeof(*out));}
@@ -311,6 +315,23 @@ int main(void) {
         }
         cJSON_Delete(root);
     }
+    snapshot.printer.moonraker_connected=true;
+    snapshot.printer.klippy_ready=true;
+    snapshot.printer.subscribed=true;
+    snapshot.printer.last_update_ms=1000;
+    for (int pending=0;pending<2;pending++) {
+        config_pending=pending;
+        build_status_json(out,sizeof(out),false);
+        cJSON *status=cJSON_Parse(out);assert(status);
+        assert(cJSON_IsTrue(cJSON_GetObjectItem(status,"pr_ready")) == !pending);
+        cJSON_Delete(status);
+    }
+    config_pending=false;
+    snapshot.printer.last_update_ms=0;
+    build_status_json(out,sizeof(out),false);
+    cJSON *stale=cJSON_Parse(out);assert(stale);
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(stale,"pr_ready")));
+    cJSON_Delete(stale);
     build_status_json(out,40,false);
     cJSON *root=cJSON_Parse(out);assert(root);
     assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(root,"err")),"status_unavailable")==0);

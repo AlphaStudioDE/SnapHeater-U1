@@ -10,6 +10,14 @@ import com.alphastudio.snapheateru1.model.AppMode
 import com.alphastudio.snapheateru1.model.HeaterSnapshot
 
 interface SnapHeaterRepository {
+    fun savePreferences(snapshot: HeaterSnapshot): HeaterSnapshot
+    fun schedulePreheat(snapshot: HeaterSnapshot): HeaterSnapshot
+    fun provisionRestToken(token: String): Unit = throw UnsupportedOperationException("Use BLE to provision a REST token")
+    fun acknowledgeVirtualDoor(detectedMs: Long): HeaterSnapshot
+    fun setVirtualDoorDetection(enabled: Boolean): HeaterSnapshot
+    fun setupWifi(action: String, ssid: String = "", password: String = ""): HeaterSnapshot =
+        throw UnsupportedOperationException("Wi-Fi setup requires BLE")
+    fun configurePrinter(host: String, port: Int, ssid: String, password: String): HeaterSnapshot
     fun snapshot(): HeaterSnapshot
     fun setMode(mode: AppMode): HeaterSnapshot
     fun setTarget(targetC: Int): HeaterSnapshot

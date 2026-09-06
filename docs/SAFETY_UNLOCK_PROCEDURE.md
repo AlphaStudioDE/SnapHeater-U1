@@ -1,5 +1,11 @@
 # Safety qualification and arming
 
+Current user flow: select a mode and activate it. No separate arm command or
+verification checkboxes are required. The firmware derives internal session
+intent from an admitted work request and checks runtime conditions itself.
+The hardware qualification guidance below is for engineering validation, not
+an app onboarding ritual. A fault clear never starts a new work request.
+
 This is a development firmware, not a hardware-qualified release.
 Read [current safety status](SAFETY_STATUS.md) before any device work.
 
@@ -20,12 +26,12 @@ the normal control policy, with all interlocks intact.
    measurement equipment and a competent mains-hardware operator.
 4. Qualify heater control, shutdown, reset and fault behavior under supervision,
    with independent temperature measurement and emergency disconnection.
-5. Only then consider explicitly arming a normal, low-target heating session.
+5. Only then consider activating a normal, low-target heating session.
    Never disable firmware interlocks to make a test pass.
 
 ## Firmware arming is not a hardware certificate
 
-Verification flags and Output Safety Latch arming are operator assertions.
+Legacy verification flags are operator records, not prerequisites for activation.
 They do not measure fan rotation, verify an intact TRIAC, or validate a bootloader.
 A valid sensor reading and ZC signal are necessary but insufficient evidence.
 

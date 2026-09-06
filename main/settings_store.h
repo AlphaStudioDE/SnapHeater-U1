@@ -21,6 +21,9 @@ typedef struct {
 } shu1_device_config_t;
 
 void shu1_device_config_defaults(shu1_device_config_t *cfg);
+void shu1_device_config_require_restart(void);
+bool shu1_device_config_restart_required(void);
+void shu1_device_id(char *out, size_t size);
 esp_err_t shu1_settings_store_load_settings(shu1_settings_t *settings);
 esp_err_t shu1_settings_store_save_settings(const shu1_settings_t *settings);
 esp_err_t shu1_settings_store_load_device_config(shu1_device_config_t *cfg);

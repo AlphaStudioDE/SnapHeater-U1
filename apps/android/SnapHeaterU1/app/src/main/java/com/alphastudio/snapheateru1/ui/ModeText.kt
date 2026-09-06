@@ -13,6 +13,7 @@ import com.alphastudio.snapheateru1.model.AppMode
 @StringRes
 fun AppMode.labelRes(): Int = when (this) {
     AppMode.AutoStandby -> R.string.mode_auto
+    AppMode.AutoStandbyTempering -> R.string.mode_auto_tempering
     AppMode.ManualHold -> R.string.mode_manual
     AppMode.Preheat -> R.string.mode_preheat
     AppMode.Drying -> R.string.mode_drying
@@ -23,6 +24,7 @@ fun AppMode.labelRes(): Int = when (this) {
 @StringRes
 fun AppMode.detailRes(): Int = when (this) {
     AppMode.AutoStandby -> R.string.mode_auto_detail
+    AppMode.AutoStandbyTempering -> R.string.mode_auto_tempering_detail
     AppMode.ManualHold -> R.string.mode_manual_detail
     AppMode.Preheat -> R.string.mode_preheat_detail
     AppMode.Drying -> R.string.mode_drying_detail
