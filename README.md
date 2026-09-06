@@ -146,7 +146,6 @@ translations and reproducible bug fixes — not bypassing safety checks.
 Read the [project story and Innovation Fund brief](docs/PROJECT_STORY.md).
 This is an independent community project, not an official Snapmaker or BIGTREETECH product.
 
-[Support development](https://buymeacoffee.com/damianborkh) ·
 [Contribute](CONTRIBUTING.md) · [Gallery](docs/GALLERY.md).
 
 ## Source and builds
@@ -161,3 +160,16 @@ Version 0.9.9 is the first packaged testing release in the new public numbering.
 Older 1.x development labels are historical, not newer stable releases.
 
 Original project: **Damian Borkowski**. [MIT License](LICENSE).
+
+## Support development
+
+If you find this project useful, you can support continued development, testing
+and documentation:
+
+- **Buy Me a Coffee:** [Support Damian's projects](https://buymeacoffee.com/damianborkh)
+- **PayPal:** `damianborkowski88@gmail.com` — enter this recipient email in PayPal.
+
+Contributions are voluntary support, not a purchase of an activation key or a
+license, and do not change this project's license or access conditions.
+Bug reports, feedback and sharing the project are also welcome.
+Thank you to everyone who supports these projects!
