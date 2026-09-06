@@ -1,4 +1,4 @@
-<p align="center"><img src="apps/android/SnapHeaterU1/app/src/main/res/drawable-nodpi/snapheater_app_icon.png" width="180" alt="SnapHeater U1 app icon"></p>
+<p align="center"><a href="docs/GALLERY.md"><img src="apps/android/SnapHeaterU1/app/src/main/res/drawable-nodpi/snapheater_app_icon.png" width="220" alt="SnapHeater U1 — Android companion app icon"></a></p>
 
 <h1 align="center">SnapHeater U1</h1>
 <p align="center"><strong>Your chamber heater. Connected to your print.</strong></p>
@@ -22,6 +22,20 @@
 [Report a problem](https://github.com/AlphaStudioDE/SnapHeater-U1/issues/new/choose)
 
 ## More than a temperature setting
+
+<p align="center">
+  <a href="docs/assets/gallery/android-connection.jpg"><img src="docs/assets/gallery/android-connection.jpg" width="160" alt="Android device connection screen"></a>
+  <a href="docs/assets/gallery/android-dashboard.jpg"><img src="docs/assets/gallery/android-dashboard.jpg" width="160" alt="Dashboard with illustrative preheat readings"></a>
+  <a href="docs/assets/gallery/android-modes.jpg"><img src="docs/assets/gallery/android-modes.jpg" width="160" alt="Task-oriented heating mode cards"></a>
+  <a href="docs/assets/gallery/android-history-preview.jpg"><img src="docs/assets/gallery/android-history-preview.jpg" width="160" alt="Temperature history and timestamped sample events"></a>
+</p>
+
+**Connect → monitor → choose a task → review history.**
+[Open the screenshot gallery](docs/GALLERY.md).
+These are interface screenshots, not evidence of a live heater test. Dashboard
+readings and History data are illustrative. Earlier dashboard/mode captures
+predate the History navigation fix; the current app includes that tab.
+The public APK has no preview option.
 
 SnapHeater connects chamber heating to the way you actually use a Snapmaker U1:
 prepare the chamber, start a print, maintain your selected conditions and
