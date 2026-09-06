@@ -114,3 +114,94 @@ Do not promise rollback to stock without checking what is actually in that slot.
 Recovery depends on the installed bootloader, not merely application build flags.
 See [return-to-stock notes](BACK_TO_ORIGINAL_FW.md). A 4 MB full backup is never
 an OTA upload. Do not run generic `idf.py flash` for routine installation.
+
+## Return to original Panda Breath firmware — step by step
+
+**Use this route while SnapHeater still boots and is reachable over LAN.**
+You upload an original Panda application through the SnapHeater Android app.
+You do not need to open the enclosure or erase the whole flash for this route.
+The firmware supports stock application identity `panda_breath`, but a complete
+return-to-stock cycle with your particular stock image and bootloader has **not
+been hardware-qualified by this project**. Keep your private backup and supervise
+the procedure; do not interpret these instructions as a recovery guarantee.
+
+### 1. Get the correct original file
+
+Open the manufacturer's official [Panda Breath firmware directory](https://github.com/bigtreetech/Panda_Breath/tree/master/Firmware).
+Choose the version appropriate for your device, open its folder and download the
+actual `.bin` file using GitHub's **Download raw file** control, not a saved HTML
+page or the repository ZIP. For example, the manufacturer publishes
+[`panda_breath_v1.0.4.bin`](https://github.com/bigtreetech/Panda_Breath/blob/master/Firmware/1.0.4/panda_breath_v1.0.4.bin)
+in its `1.0.4` folder. This is an example, not a claim that every board/bootloader
+has been tested with that version. Read the manufacturer's version notes first.
+
+**Do not select `generic.bin`, a 4 MB full-flash backup, a bootloader or a
+partition-table image.** This workflow accepts an application image only.
+Keep the downloaded file on your phone before beginning the update.
+
+### 2. Connect the app to the correct Panda over LAN
+
+Connect the phone and Panda to the same local network. In SnapHeater Android,
+connect to that heater using its LAN address and saved REST access token.
+A BLE-only connection cannot transfer OTA firmware. If you do not yet have a
+REST token, configure it through the app's BLE advanced-settings workflow first;
+do not substitute the BLE PIN for the REST token.
+
+Confirm that the displayed device and live status belong to the Panda you intend
+to restore. Do not proceed with a disconnected or stale status screen.
+
+### 3. Stop work and let the unit cool
+
+Use **Turn heating off** (Polish: **Wyłącz grzanie**), cancel any scheduled job,
+and wait for the fan/cooldown to finish. Merely pausing a job is not sufficient.
+OTA admission requires no active/paused/scheduled work or fault latch, outputs
+off and fresh valid chamber/PTC readings **both below 30 °C**.
+If conditions are not met, wait or resolve the actual fault — never bypass them.
+Leave Panda powered throughout the upload and restart.
+
+### 4. Select the stock BIN in Settings
+
+In the normal connected-device interface, open **Settings → Firmware update
+(OTA)** (Polish: **Ustawienia → Aktualizacja firmware (OTA)**).
+The card is in the main Settings screen below notification monitoring, before
+the safety controls; it is not inside Advanced Settings or the local preview.
+Tap **Choose .bin file** (**Wybierz plik .bin**), select the original Panda
+application downloaded in step 1, then confirm **Upload and restart**
+(**Wyślij i uruchom ponownie**).
+
+SnapHeater writes the inactive application slot and checks the image, identity
+and transferred SHA-256 before selecting it for reboot. **Do not disconnect
+power, switch networks or start another operation during the update.**
+
+### 5. Verify the return in the manufacturer's interface
+
+After a successful restart, the SnapHeater app may lose connection: stock does
+not provide the SnapHeater BLE/REST interface. That alone is not a failed restore.
+Open the original Panda web interface at its current LAN IP. If stock instead
+exposes its default `Panda_Breath_XXXXXXXXXX` hotspot, follow the
+[manufacturer's connection instructions](https://github.com/bigtreetech/docs/blob/master/docs/Panda_Breath.md#wifi-connection-guide):
+default password `987654321`, browser address `http://192.168.254.1`.
+Previously changed settings may differ; do not assume network settings migrated.
+
+Check **Settings → firmware version** in that original interface, then verify
+plausible temperature readings and idle heater/fan behavior before further use.
+Returning the application to stock is not a factory reset, repair of damaged
+hardware or proof that operation is safe. Firmware/NVS formats can differ.
+
+### If something goes wrong
+
+- **The file is rejected:** stop and record the exact error and filename. Do not
+  rename a full dump to disguise it, erase flash or force a write.
+- **The app reports an unconfirmed update or disconnects:** the unit may already
+  have rebooted into stock. Check its web interface/version before any retry.
+- **SnapHeater still runs:** reconnect and inspect its reported firmware version
+  and error before deciding on another upload.
+- **Neither firmware boots or the unit is unreachable:** phone OTA cannot repair
+  an unreachable device. See [USB backup/recovery notes](BACK_TO_ORIGINAL_FW.md)
+  and obtain qualified assistance if hardware access is required. Do not work on
+  exposed mains circuitry.
+
+There is currently **no “Restore stock” or “Boot inactive slot” button in Android**.
+The firmware's separate inactive-slot REST command is not a guarantee of stock
+recovery: a later update may already have replaced that slot. The file-upload
+procedure above does not depend on an untouched stock slot remaining available.
