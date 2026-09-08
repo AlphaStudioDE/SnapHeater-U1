@@ -24,15 +24,12 @@
 ## More than a temperature setting
 
 <p align="center">
-  <a href="docs/assets/gallery/android-connection.jpg"><img src="docs/assets/gallery/android-connection.jpg" width="160" alt="Android device connection screen"></a>
-  <a href="docs/assets/gallery/android-dashboard.jpg"><img src="docs/assets/gallery/android-dashboard.jpg" width="160" alt="Dashboard with illustrative preheat readings"></a>
-  <a href="docs/assets/gallery/android-modes.jpg"><img src="docs/assets/gallery/android-modes.jpg" width="160" alt="Task-oriented heating mode cards"></a>
-  <a href="docs/assets/gallery/android-history-preview.jpg"><img src="docs/assets/gallery/android-history-preview.jpg" width="160" alt="Temperature history and timestamped sample events"></a>
+  <a href="docs/assets/gallery/snapheater-u1-overview.png"><img src="docs/assets/gallery/snapheater-u1-overview.png" width="1200" alt="SnapHeater U1 overview: connect, monitor, control and review — Android interface preview with illustrative data"></a>
 </p>
 
 **Connect → monitor → choose a task → review history.**
 [Open the screenshot gallery](docs/GALLERY.md).
-These are interface screenshots, not evidence of a live heater test. Dashboard
+This overview uses interface screenshots, not evidence of a live heater test. Dashboard
 readings and History data are illustrative. Earlier dashboard/mode captures
 predate the History navigation fix; the current app includes that tab.
 The public APK has no preview option.
