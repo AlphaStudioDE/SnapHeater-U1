@@ -30,7 +30,9 @@ SCENARIOS=("chamber_open", "ptc_short", "nan_with_ok_status", "adc_read_error",
            "freeze_warning_zc_loss_immediate", "freeze_warning_overheat_immediate", "freeze_warning_pause_does_not_extend_deadline",
            "symbiont_curve_no_simultaneous_heating", "symbiont_overheat_still_latches", "symbiont_disconnect_does_not_stop_manual_job",
            "negative_ptc_offset_cannot_delay_cut", "negative_chamber_offset_cannot_delay_cut",
-           "foldback_override_cannot_raise_board_limit")
+           "foldback_override_cannot_raise_board_limit", "chamber_only_freeze_continuous_on",
+           "ptc_only_freeze_continuous_on", "dual_freeze_partial_recovery_keeps_deadline",
+           "bangbang_boundaries_and_off", "airflow_advisory_survives_foldback_cycles")
 
 class ControlLoopSimulationTests(unittest.TestCase):
     def test_production_control_loop_scenarios(self):
@@ -43,7 +45,7 @@ class ControlLoopSimulationTests(unittest.TestCase):
                       ROOT/"main",Path(os.environ.get("SHU1_TEST_CONFIG", str(ROOT/"build-heater-compile-test/config"))),idf/"components/json/cJSON"]:
                 cmd.append("-I"+str(p))
             for p in ["tests/control_loop_sim.c","main/app_state.c","main/control_lease.c",
-                      "main/safety_latch.c","main/session_journal.c","main/heater.c","main/fan_triac.c","main/dc_pid.c","main/profiles.c"]:
+                      "main/safety_latch.c","main/session_journal.c","main/heater.c","main/fan_triac.c","main/profiles.c"]:
                 cmd.append(str(ROOT/p))
             result=subprocess.run(cmd+["-o",str(exe)],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)

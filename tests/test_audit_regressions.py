@@ -113,7 +113,7 @@ int main(void) {
 
     def test_rise_detector_observes_session_and_latches(self):
         safety = source("safety.c")
-        self.assertIn("update_rise_detector(&rt, pid_active", safety)
+        self.assertIn("update_rise_detector(&rt, controller_active", safety)
         self.assertNotIn("update_rise_detector(&rt, request_heat", safety)
         self.assertIn("SHU1_HEATER_NO_RISE", safety.split("const bool persistent_hazard =")[1].split(";")[0])
         self.compile(COMMON + function("safety.c", "static void update_rise_detector(") + r'''

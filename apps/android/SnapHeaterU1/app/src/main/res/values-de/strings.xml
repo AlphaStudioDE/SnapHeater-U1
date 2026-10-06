@@ -368,7 +368,12 @@
     <string name="history_invalid_sensor">Ungültiger Sensorwert</string>
     <string name="history_more_gaps">%1$d weitere Markierungen sind im CSV-Export enthalten.</string>
     <string name="freeze_title">Verdacht auf eingefrorene Messwerte</string>
-    <string name="freeze_message">%1$s: Messwerte ändern sich trotz Heizungsumschaltung nicht. Wenn das Problem anhält, stoppt Panda die Heizung in %2$d s. Weiter bestätigt nur die Warnung und verlängert die Frist nicht.</string>
+    <string name="freeze_message">%1$s · %3$s: Messwerte ändern sich trotz aktiver Heizung nicht. Wenn das Problem anhält, stoppt Panda die Heizung in %2$d s. Weiter bestätigt nur die Warnung und verlängert die Frist nicht.</string>
+    <string name="freeze_sensor_chamber">Kammersensor</string>
+    <string name="freeze_sensor_ptc">Heizelementsensor (PTC)</string>
+    <string name="freeze_sensor_both">Beide Sensoren: Kammer und Heizelement</string>
+    <string name="freeze_sensor_unknown">Sensor von der Firmware nicht angegeben</string>
+    <string name="freeze_event_sensor">%1$s: Verdacht auf eingefrorenen Messwert. Aktuellen Zustand in der App prüfen. Die ursprüngliche Abschaltfrist wird nicht verlängert.</string>
     <string name="freeze_disconnected">Verbindung unterbrochen. Panda zählt selbstständig weiter und stoppt die Heizung, falls das Problem anhält. Die Restzeit ist derzeit nicht bestätigt.</string>
     <string name="freeze_stop">Heizung ausschalten</string>
     <string name="freeze_continue">Weiter</string>

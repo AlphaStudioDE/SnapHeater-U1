@@ -108,7 +108,7 @@ hardware OTA recovery.
   settings, Android process management, disconnection, queue overwrite and
   Panda restart can lose events. A local receipt does not prove human reading.
 - Panda does not automatically rediscover a printer after IP changes.
-- NTC acquisition freshness and passive dual-raw-invariance detection are
+- NTC acquisition freshness and passive per-channel raw-invariance detection are
   implemented; this is not universal detection of plausible frozen readings.
   See [sensor diagnostics](SENSOR_DIAGNOSTICS.md) for thresholds and limitations.
 - Installed bootloader compatibility, interrupted OTA/stock recovery, actual

@@ -368,7 +368,12 @@
     <string name="history_invalid_sensor">Invalid sensor reading</string>
     <string name="history_more_gaps">%1$d more markers are included in CSV export.</string>
     <string name="freeze_title">Suspected frozen temperature readings</string>
-    <string name="freeze_message">%1$s: readings are not changing despite heater cycling. If the problem persists, Panda will stop heating in %2$d s. Continue only acknowledges this warning and does not extend the deadline.</string>
+    <string name="freeze_message">%1$s · %3$s: readings are not changing despite applied heating. If the problem persists, Panda will stop heating in %2$d s. Continue only acknowledges this warning and does not extend the deadline.</string>
+    <string name="freeze_sensor_chamber">Chamber sensor</string>
+    <string name="freeze_sensor_ptc">Heater element sensor (PTC)</string>
+    <string name="freeze_sensor_both">Both sensors: chamber and heater element</string>
+    <string name="freeze_sensor_unknown">Sensor not specified by firmware</string>
+    <string name="freeze_event_sensor">%1$s: suspected frozen reading. Open the app to check the current state. The original automatic stop deadline is not extended.</string>
     <string name="freeze_disconnected">Connection lost. Panda continues its own countdown and will stop heating if the problem persists. The remaining time cannot currently be confirmed.</string>
     <string name="freeze_stop">Turn off heating</string>
     <string name="freeze_continue">Continue</string>

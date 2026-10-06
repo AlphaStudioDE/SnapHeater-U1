@@ -16,7 +16,8 @@
 #include "usage_counters.h"
 #include "symbiont_rules.h"
 #include "heater.h"
-#include "heater_pid.h"
+#include "heater_control.h"
+#include "airflow_watch.h"
 #include "safety_latch.h"
 #include "session_journal.h"
 #include "control_lease.h"
@@ -41,13 +42,11 @@ static bool g_last_printing_for_start_warning = false;
 static float g_warm_prev_temp = NAN;
 static int64_t g_warm_prev_ms = 0;
 static float g_warm_rate_ema = 0.0f;
-static int64_t g_airflow_start_ms = 0;
-static float g_airflow_start_chamber = NAN;
-static float g_airflow_start_ptc = NAN;
+static shu1_airflow_watch_t g_airflow_watch;
 static uint64_t g_last_zc_edges = 0;
 static int64_t g_last_zc_sample_ms = 0;
 static bool g_ptc_foldback_active = false;
-static shu1_pid_state_t g_heater_pid;
+static shu1_heater_control_t g_heater_control;
 static volatile bool g_control_task_healthy = false;
 static TaskHandle_t g_control_task_handle = NULL;
 
@@ -809,33 +808,28 @@ static void update_filter_and_wear(shu1_settings_t *st, shu1_runtime_t *rt) {
     }
 }
 
-static void update_airflow_detection(shu1_settings_t *st, shu1_runtime_t *rt, bool request_heat, int64_t now_ms) {
-    if (!st->airflow_detection_enabled || !request_heat || !isfinite(rt->ptc_temp_c) || !isfinite(rt->chamber_temp_c)) {
-        g_airflow_start_ms = 0;
-        return;
-    }
-    if (g_airflow_start_ms <= 0) {
-        g_airflow_start_ms = now_ms;
-        g_airflow_start_chamber = rt->chamber_temp_c;
-        g_airflow_start_ptc = rt->ptc_temp_c;
-        return;
-    }
-    int64_t elapsed = now_ms - g_airflow_start_ms;
-    if (elapsed < SHU1_AIRFLOW_WINDOW_MS) return;
-    float ptc_delta = rt->ptc_temp_c - rt->chamber_temp_c;
-    float chamber_rise = rt->chamber_temp_c - g_airflow_start_chamber;
-    if (ptc_delta >= SHU1_AIRFLOW_PTC_DELTA_C && chamber_rise < SHU1_AIRFLOW_MIN_CHAMBER_RISE_C) {
+static void update_airflow_detection(shu1_settings_t *st, shu1_runtime_t *rt, int target, int64_t now_ms) {
+    // Track warm-up, not an individual SSR ON phase. Holding near target need
+    // not produce a rise. This advisory is not confirmation of physical airflow.
+    const bool observing = st->airflow_detection_enabled && st->work_on &&
+        !st->user_paused && rt->heater_fault == SHU1_HEATER_OK &&
+        !shu1_control_maintenance_active() && !shu1_safety_latch_is_set() &&
+        !shu1_safety_latch_is_inhibited() && target > 0 &&
+        (float)target - rt->chamber_temp_c > 2.0f;
+    const shu1_airflow_result_t result = shu1_airflow_watch_step(&g_airflow_watch,
+        observing, rt->heater_output_on, rt->chamber_temp_c, rt->ptc_temp_c, now_ms);
+    if (result == SHU1_AIRFLOW_SUSPECT) {
+        const bool new_warning = !st->airflow_warning_pending;
         st->airflow_warning_pending = true;
         rt->airflow_warning_pending = true;
         rt->airflow_score_pct = 35;
-        shu1_event_log_add("warn", "weak_airflow_detected", "PTC is hot but chamber warms slowly; check fan/filter/air path");
-        shu1_ble_notify_status_now();
-    } else {
+        if (new_warning) {
+            shu1_event_log_add("warn", "weak_airflow_detected", "PTC is hot but chamber warms slowly; check fan/filter/air path");
+            shu1_ble_notify_status_now();
+        }
+    } else if (result == SHU1_AIRFLOW_NO_ANOMALY) {
         rt->airflow_score_pct = 100;
     }
-    g_airflow_start_ms = now_ms;
-    g_airflow_start_chamber = rt->chamber_temp_c;
-    g_airflow_start_ptc = rt->ptc_temp_c;
 }
 
 static void update_print_risk_and_start_warnings(shu1_settings_t *st, shu1_runtime_t *rt, const shu1_printer_state_t *pr, int target) {
@@ -1068,7 +1062,7 @@ static void update_v13_extended_features(shu1_settings_t *st, shu1_runtime_t *rt
     update_warmup_prediction(st, rt, request_heat, target, now_ms);
     if (!st->user_paused) update_heat_soak(st, rt, target, now_ms);
     update_filter_and_wear(st, rt);
-    update_airflow_detection(st, rt, request_heat, now_ms);
+    update_airflow_detection(st, rt, target, now_ms);
     update_print_risk_and_start_warnings(st, rt, pr, target);
     update_safety_score(st, rt, pr);
 }
@@ -1090,6 +1084,7 @@ static void control_task(void *arg) {
     bool thermal_purge = true;
     shu1_sensor_watch_t sensor_watch = {0};
     shu1_sample_health_t previous_sample_health = SHU1_SAMPLE_HEALTHY;
+    unsigned previous_freeze_mask = 0;
     uint32_t auto_context_epoch = UINT32_MAX;
     while (true) {
         SHU1_CONTROL_GUARD(policy_guard);
@@ -1191,8 +1186,11 @@ static void control_task(void *arg) {
         rt.sensor_freeze_warning_ms = sample_health == SHU1_SAMPLE_WARNING ? sensor_watch.warning_us / 1000 : 0;
         rt.sensor_freeze_remaining_s = sample_health == SHU1_SAMPLE_WARNING ?
             (int)((sensor_watch.warning_us + SHU1_RAW_WARNING_GRACE_US - acquisition_now_us + 999999) / 1000000) : 0;
-        if (sample_health == SHU1_SAMPLE_WARNING && previous_sample_health != SHU1_SAMPLE_WARNING)
-            shu1_event_log_add("warn", "sensor_freeze_warning", "suspected frozen readings; autonomous stop in 5 minutes unless readings recover");
+        rt.sensor_freeze_mask = (sample_health == SHU1_SAMPLE_WARNING || sensor_watch.frozen) ? sensor_watch.suspect_mask : 0;
+        if (sample_health == SHU1_SAMPLE_WARNING &&
+            (previous_sample_health != SHU1_SAMPLE_WARNING || previous_freeze_mask != rt.sensor_freeze_mask))
+            shu1_event_log_add("warn", shu1_sensor_warning_code(rt.sensor_freeze_mask), "suspected frozen reading; original autonomous stop deadline unchanged");
+        previous_freeze_mask = rt.sensor_freeze_mask;
         if (sample_health == SHU1_SAMPLE_HEALTHY && previous_sample_health == SHU1_SAMPLE_WARNING)
             shu1_event_log_add("info", "sensor_freeze_ended", "raw readings changed or heating stopped; warning ended");
         if (sample_health != SHU1_SAMPLE_HEALTHY && sample_health != SHU1_SAMPLE_WARNING) {
@@ -1204,7 +1202,7 @@ static void control_task(void *arg) {
                 shu1_event_log_add("critical",
                     sample_health == SHU1_SAMPLE_STALE ? "sensor_sample_stale" : "sensor_raw_frozen",
                     sample_health == SHU1_SAMPLE_STALE ? "ADC acquisition freshness check failed" :
-                    "both raw ADC readings invariant despite normal SSR cycling; heating stopped");
+                    "raw ADC reading invariant despite applied heating; heating stopped");
             }
         }
         previous_sample_health = sample_health;
@@ -1236,7 +1234,7 @@ static void control_task(void *arg) {
 
         bool request_heat = false;
         bool request_fan = false;
-        bool pid_active = false;
+        bool controller_active = false;
         const bool symbiont_active = st.symbiont_mode_enabled && st.symbiont_ventilation_allowed &&
             st.symbiont_safe_control_enabled && st.symbiont_policy==SHU1_SYMBIONT_POLICY_CLIMATE_SAFE &&
             st.work_on && !st.user_paused && target>0 && sensor_ok &&
@@ -1268,20 +1266,19 @@ static void control_task(void *arg) {
                     shu1_safety_latch_is_set() || shu1_safety_latch_is_inhibited() ||
                     shu1_control_maintenance_active() || !wdt_armed ||
                     !CONFIG_SHU1_ENABLE_HEATER_OUTPUT || !shu1_fan_triac_is_running();
-                pid_active = shu1_pid_step_timed(&g_heater_pid, (float)target,
-                    rt.chamber_instant_temp_c, !inhibited, esp_timer_get_time(), &duty);
-                rt.heater_approach_limit = shu1_pid_approach_cap((float)target - rt.chamber_instant_temp_c);
+                controller_active = shu1_heater_control_step(&g_heater_control, (float)target,
+                    rt.chamber_instant_temp_c, inhibited, &duty);
+                rt.heater_approach_limit = 1.0f; // retained API field: no PID approach cap
                 snprintf(rt.heater_constraint, sizeof(rt.heater_constraint), "%s",
-                    shu1_pid_constraint(pid_active, g_ptc_foldback_active, (float)target,
+                    shu1_heater_control_constraint(controller_active, g_ptc_foldback_active, inhibited, (float)target,
                                         rt.chamber_instant_temp_c, duty));
-                rt.heater_commanded_duty = pid_active && !inhibited ? duty : 0.0f;
-                request_heat = pid_active && shu1_pid_window_on(
-                    &g_heater_pid, rt.heater_commanded_duty, esp_timer_get_time());
+                rt.heater_commanded_duty = controller_active && !inhibited ? duty : 0.0f;
+                request_heat = rt.heater_commanded_duty > 0.0f;
                 if (request_heat) request_fan = true;
             }
         }
 
-        if (!pid_active) shu1_pid_reset(&g_heater_pid);
+        if (!controller_active) shu1_heater_control_reset(&g_heater_control);
 
         if (st.work_mode == SHU1_MODE_DRY_OUT && st.dryout_running) {
             request_fan = true;
@@ -1337,7 +1334,7 @@ static void control_task(void *arg) {
 
         // Warm-up watchdog: SSR off-phases must not reset it; normal holding near
         // target is not expected to keep increasing temperature.
-        update_rise_detector(&rt, pid_active && rt.heater_commanded_duty > 0.0f &&
+        update_rise_detector(&rt, controller_active && rt.heater_commanded_duty > 0.0f &&
             (float)target - rt.chamber_instant_temp_c > 2.0f, now_ms);
         if (rt.heater_fault != SHU1_HEATER_OK) request_heat = false;
 
@@ -1370,11 +1367,11 @@ static void control_task(void *arg) {
             if (ctl_snapshot.owner != SHU1_CONTROL_NONE) shu1_control_release_any();
         }
 
-        // DragonBreath residual-heat purge. "Heat mode" is the armed PID state,
-        // not the instantaneous SSR window pulse. After heat has run, start the
+        // DragonBreath residual-heat purge. "Heat mode" is the active job,
+        // not the instantaneous SSR output. After heat has run, start the
         // purge unless BOTH sensors confirm < release+3 C; once started, release
         // only when BOTH are known below release. Unknown is deliberately hot.
-        const bool heat_mode = pid_active && !shu1_safety_latch_is_set();
+        const bool heat_mode = controller_active && !shu1_safety_latch_is_set();
         if (heat_mode) {
             heated_this_session = true;
             thermal_purge = false;

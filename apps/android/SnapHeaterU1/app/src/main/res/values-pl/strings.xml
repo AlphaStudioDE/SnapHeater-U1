@@ -368,7 +368,12 @@
     <string name="history_invalid_sensor">Nieprawidłowy odczyt czujnika</string>
     <string name="history_more_gaps">Pozostałe znaczniki (%1$d) są dostępne w eksporcie CSV.</string>
     <string name="freeze_title">Podejrzenie zamrożonych odczytów</string>
-    <string name="freeze_message">%1$s: odczyty nie zmieniają się mimo przełączania grzałki. Jeśli problem nie ustąpi, Panda wyłączy grzanie za %2$d s. Kontynuuj tylko potwierdza ostrzeżenie i nie przedłuża terminu.</string>
+    <string name="freeze_message">%1$s · %3$s: odczyty nie zmieniają się mimo grzania. Jeśli problem nie ustąpi, Panda wyłączy grzanie za %2$d s. Kontynuuj tylko potwierdza ostrzeżenie i nie przedłuża terminu.</string>
+    <string name="freeze_sensor_chamber">Czujnik komory</string>
+    <string name="freeze_sensor_ptc">Czujnik elementu grzejnego (PTC)</string>
+    <string name="freeze_sensor_both">Oba czujniki: komory i elementu grzejnego</string>
+    <string name="freeze_sensor_unknown">Firmware nie wskazuje czujnika</string>
+    <string name="freeze_event_sensor">%1$s: podejrzenie zamrożonego odczytu. Otwórz aplikację i sprawdź aktualny stan. Pierwotny termin automatycznego wyłączenia nie jest przedłużany.</string>
     <string name="freeze_disconnected">Utracono połączenie. Panda samodzielnie odlicza czas i wyłączy grzanie, jeśli problem nie ustąpi. Nie można teraz potwierdzić pozostałego czasu.</string>
     <string name="freeze_stop">Wyłącz grzanie</string>
     <string name="freeze_continue">Kontynuuj</string>

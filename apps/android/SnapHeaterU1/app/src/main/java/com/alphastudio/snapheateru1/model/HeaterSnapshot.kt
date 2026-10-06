@@ -52,6 +52,7 @@ data class HeaterSnapshot(
     val paused: Boolean = false,
     val sensorFreezeWarningMs: Long = 0,
     val sensorFreezeRemainingS: Int = 0,
+    val sensorFreezeMask: Int = 0,
     val usageAvailable: Boolean = false,
     val heaterUsageMs: Long = 0,
     val filterUsageMs: Long = 0,

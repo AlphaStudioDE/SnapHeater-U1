@@ -17,8 +17,14 @@ validation and public documentation made the hardware-focused revival of this
 project possible. DragonBreath's published findings form the essential basis of
 the revived Panda Breath hardware layer.
 
-The current findings were checked against DragonBreath commit
-`25c831c032d459eb5c573ba6b69022e242ea7bec`. The experimental direct inclusion
+The hardware findings and current default hysteresis control were rechecked on
+2026-10-06 against DragonBreath commit
+`f311a22c39a3e3aef92d10f0f6c3f2d5d63e02b9` (v1.1.19 era), including PRs
+[103](https://github.com/plastikman/DragonBreath/pull/103) and
+[107](https://github.com/plastikman/DragonBreath/pull/107).
+The published 0.9.9 image used the earlier reviewed commit
+`25c831c032d459eb5c573ba6b69022e242ea7bec`; these later source changes do not
+retroactively change that release. The experimental direct inclusion
 of upstream fan/ZC and PID-policy modules was selectively reverted.
 SnapHeater uses local implementations again; this is not a claim of clean-room
 authorship of all earlier adapted work. Adapted portions retain their documented
@@ -30,11 +36,14 @@ portions in this repository retain attribution.
 
 ## dragon-core PID and OTA reference
 
-The generic PID math in `main/dc_pid.c` and `main/dc_pid.h` is adapted from the
+The generic PID math formerly in `main/dc_pid.c` and `main/dc_pid.h` was adapted from the
 MIT-licensed [`dragon-core`](https://github.com/justinh-rahb/dragon-core)
 component `dc_pid`, release `v0.32.0`, commit
 `4e041d864763d468a50e9649807827dd83dd54bc`. Its copyright and license remain
-with its author.
+with its author. The old PID/10-second-window path was removed from current
+source in favor of local 1 C hysteresis control; it remains in Git history and
+the published 0.9.9 release. Attribution is retained for that history and the OTA
+reference still in use. We do not enable upstream's opt-in experimental PID.
 
 The upstream license is retained in [dragon-core-MIT.txt](docs/licenses/dragon-core-MIT.txt).
 

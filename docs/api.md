@@ -206,12 +206,15 @@ does not clear the latch unless the control task sees idle operation, valid
 sensors and temperatures below both hard cutoffs.
 The request is a one-shot attempt, not a deferred clear: if conditions are unsafe,
 send a new request after resolving the fault. Clearing does not restart heating.
-Acquisition freshness failures and suspected dual-raw freezes use `sensor_fault`;
+Acquisition freshness failures and expired single/dual raw freezes use `sensor_fault`;
 see [sensor diagnostics](SENSOR_DIAGNOSTICS.md) for detection and recovery limits.
 `runtime.sensor_freeze_warning_ms` identifies a pending early warning (zero if
 none); `runtime.sensor_freeze_remaining_s` reports Panda-owned time remaining.
 The compact BLE status exposes the same keys at its root. A pending warning is
 not a fault-clear opportunity and acknowledgement cannot alter its deadline.
+`sensor_freeze_mask` is read-only: 1 = chamber sensor, 2 = heater-element sensor,
+3 = both. Missing/0/unknown values do not identify a sensor. It is also available
+at the compact BLE root; it is not a settings/command field.
 
 Modes:
 
@@ -232,28 +235,12 @@ Drying modes:
 
 ## POST /api/probe
 
-Disabled by default. Compile with:
-
-```txt
-CONFIG_SHU1_ENABLE_GPIO_PROBE=y
-```
-
-Then use only on a supervised bench:
-
-```json
-{"output":"fan","duration_ms":1000}
-```
-
-Heater commands are deliberately rejected:
-
-```json
-{"output":"heater","duration_ms":200}
-```
-
-The only accepted probe output is the fan. Heater operation is allowed only
-through the normal PID path after sensor, foldback, zero-cross, airflow, output
-latch and persistent-fault checks. The fan endpoint can energize a physical
-output and must not be exposed casually.
+Probe commands are rejected for both fan and heater. There is no supported
+direct-GPIO bypass, even when a legacy probe setting is present. Use the normal
+authenticated job commands; the safety task is the only heater ON writer.
+The current regulator uses 1 C hysteresis after sensor, foldback, zero-cross,
+logical fan-gate, output-latch and persistent-fault checks. Logical fan state
+does not prove actual rotation or airflow.
 
 ## Preheat / Hold mode
 

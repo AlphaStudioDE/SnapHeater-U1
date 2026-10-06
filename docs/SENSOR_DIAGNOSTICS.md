@@ -2,7 +2,7 @@
 
 This is an additional SnapHeater diagnostic, not a claim that DragonBreath
 validated these detection thresholds. It does not change Panda pin assignments,
-TRIAC gate timing, NTC conversion/filtering, SSR PID/window timing or PTC foldback.
+TRIAC gate timing, NTC conversion/filtering, SSR control policy or PTC foldback.
 It never requests a heating pulse to test a sensor.
 
 ## Acquisition freshness
@@ -23,22 +23,25 @@ not that a malfunctioning ADC returned the true physical temperature.
 
 Only an active, unpaused heating job collects evidence. All of these are required:
 
-- Both valid raw ADC codes remain bit-identical for at least 60 seconds.
-- The previous applied logical SSR output includes at least 30 seconds ON and
-  30 seconds OFF during that unchanged interval.
-- At least six logical SSR transitions have been observed.
+- At least one valid raw ADC code remains bit-identical for at least 60 seconds.
+  Each channel has an independent evidence window.
+- The previous applied logical SSR output includes at least 30 seconds ON during
+  that channel's unchanged interval. OFF phases retain evidence; continuous ON
+  also qualifies. No artificial probe pulse or minimum switching count is used.
 - Samples remain valid and adjacent monitoring intervals are at most 1500 ms.
 
 These conditions start a warning, not an immediate frozen-reading cutoff.
 Panda starts a fixed 300-second countdown when it generates `sensor_freeze_warning`.
-If neither raw code changes before that deadline, the control task trips the
+If any suspected channel remains unchanged at that deadline, the control task trips the
 existing persistent sensor fault. No phone response, receipt, disconnection or
 pause extends the deadline. OFF cancels the pending warning by stopping the job.
 Freshness failures, invalid sensors, overtemperature and ZC faults continue to
 stop heating immediately, including during this grace period.
 
-Any change in either raw code ends the pending warning and starts a new evidence
-window. Before a warning starts, invalid samples, observation gaps, OFF and user
+Activity in an unrelated channel cannot cancel another channel's warning. Each
+suspected channel must show activity for the pending warning to end. Additional
+suspicions during a warning cannot extend its original deadline. Before a
+warning starts, invalid samples, observation gaps, OFF and user
 pause reset unconfirmed evidence. Display rounding,
 calibration and the five-sample average are not inputs to this raw-code comparison.
 Steady displayed temperature with changing raw codes does not trigger it.
@@ -46,14 +49,14 @@ Steady displayed temperature with changing raw codes does not trigger it.
 These are conservative engineering thresholds, **not hardware-qualified thermal
 limits or a guaranteed time-to-detect**. Normal quantized readings can theoretically
 meet the condition: a trip means suspicion requiring investigation, not a proven
-broken thermistor. One frozen sensor while the other changes, a stuck value with
-noise, an erroneous but changing reading, or no qualifying SSR cycling can evade
+broken thermistor. A stuck value with noise, an erroneous but changing reading,
+a detached sensor, or insufficient observed SSR ON time can evade
 this diagnostic. Existing no-rise protection still covers its own warm-up cases.
 Do not interpret a passing diagnostic as proof that the device is safe.
 
 ## Fault handling and recovery
 
-Freshness failure emits `sensor_sample_stale`; expired dual raw invariance emits
+Freshness failure emits `sensor_sample_stale`; expired single/dual raw invariance emits
 `sensor_raw_frozen`. Both use the existing `sensor_fault` safety category.
 The control task cuts SSR before diagnostic logging or fault persistence. During
 an active/armed session, the existing persistent latch stops the job and requests
@@ -61,7 +64,7 @@ fault cooling; ZC/physical fan limitations still apply. All command transports
 see the same fault. Notification delivery depends on phone connectivity/settings.
 
 Confirmed raw-invariance suspicion is not erased by OFF/pause. During the same
-boot, both raw channels must show activity before fault clear is permitted. This
+boot, every suspected raw channel must show activity before fault clear is permitted. This
 is still not proof of sensor accuracy. A rejected clear request is consumed, not
 queued until conditions improve: a new explicit clear is required. Clearing never
 restores the stopped job. After restart the generic persistent fault remains,
@@ -72,9 +75,10 @@ but detailed raw evidence is RAM-only; restart is not a sensor validation test.
 `tests/test_sensor_watch.py` compiles the production monitor and acquisition
 function with fake ADC/time I/O. It checks freshness, sequence wrap, channel read
 failures, normal stable temperatures with raw activity, idle/pause, one-channel
-activity, incomplete SSR evidence, warning and grace boundaries and recovery.
+activity, single-channel freezes under continuous heat, partial recovery,
+incomplete heating evidence, warning and grace boundaries and recovery.
 `tests/control_loop_sim.c` executes the production safety loop and logical output
-drivers: dual freeze near target trips, SSR is already OFF at NVS writes, fault
+drivers: single/dual freeze near target trips, SSR is already OFF at NVS writes, fault
 cooling stays requested, early clear is rejected, and recovery plus clear does
 not restart heating. It also injects replayed, old, future and slow acquisitions.
 
@@ -87,6 +91,13 @@ electrical conduction still require device-specific validation.
 REST runtime and compact BLE status expose `sensor_freeze_warning_ms` and
 `sensor_freeze_remaining_s`. These are Panda-owned state, never control fields.
 An active warning opens a dialog with Stop and Continue. Stop uses the existing
+control path. Android version code 5 also reads `sensor_freeze_mask`: 1 = chamber,
+2 = heater element (PTC), 3 = both, 0/missing/unknown = unspecified. The same
+read-only field is in REST runtime and compact BLE status. A source change during
+the same warning reopens the dialog but never resets the Panda deadline.
+Codes `sensor_freeze_warning_chamber`, `sensor_freeze_warning_ptc` and
+`sensor_freeze_warning_both` preserve the identity in notifications and history;
+the legacy generic event remains supported. Stop uses the existing
 control path; failure is not presented as a confirmed stop. Continue records a
 local acknowledgement only and does not send any heater/start/lease command.
 The status dialog also works when OS notifications are disabled. On disconnection

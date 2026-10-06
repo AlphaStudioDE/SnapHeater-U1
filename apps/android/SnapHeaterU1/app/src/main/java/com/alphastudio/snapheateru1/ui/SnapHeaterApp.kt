@@ -355,7 +355,7 @@ fun SnapHeaterApp(notificationDevice: String="", onNotificationHandled: () -> Un
         }
     }
     val alertId = snapshot.virtualDoorDetectedMs
-    var freezeAcknowledged by remember(snapshot.deviceId,snapshot.sensorFreezeWarningMs) { mutableStateOf(false) }
+    var freezeAcknowledged by remember(snapshot.deviceId,snapshot.sensorFreezeWarningMs,snapshot.sensorFreezeMask) { mutableStateOf(false) }
     LaunchedEffect(snapshot.deviceId,snapshot.sensorFreezeWarningMs) {freezeStopError=""}
     if (appSession==AppSession.Connected && snapshot.sensorFreezeWarningMs>0 && !freezeAcknowledged) {
         androidx.compose.material3.AlertDialog(
@@ -363,7 +363,8 @@ fun SnapHeaterApp(notificationDevice: String="", onNotificationHandled: () -> Un
             title = { Text(stringResource(R.string.freeze_title)) },
             text = { Column {
                 Text(if(connectionHealthy)
-                    stringResource(R.string.freeze_message,"SH_${snapshot.deviceId.takeLast(4)}",snapshot.sensorFreezeRemainingS)
+                    stringResource(R.string.freeze_message,"SH_${snapshot.deviceId.takeLast(4)}",snapshot.sensorFreezeRemainingS,
+                        stringResource(com.alphastudio.snapheateru1.data.freezeSensorLabel(snapshot.sensorFreezeMask)))
                     else stringResource(R.string.freeze_disconnected))
                 if(stopPending) Text(stringResource(R.string.heating_stopping))
                 if(freezeStopError.isNotBlank()) Text(freezeStopError,color=MaterialTheme.colorScheme.error)

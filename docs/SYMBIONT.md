@@ -22,7 +22,7 @@ Use the fresh unrounded Panda chamber reading minus the effective target:
 
 Linear interpolation between the points, rounded to integer percent. Enter
 cooling only ABOVE +5 C; remain in cooling until <= +2 C. While this cooling
-phase is active, the Panda PID is inhibited so it does not oppose the requested
+phase is active, the Panda heater regulator is inhibited so it does not oppose the requested
 cooling. This curve NEVER controls the Panda fan TRIAC: its held-gate airflow
 and thermal purge remain under the existing safety loop.
 

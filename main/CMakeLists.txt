@@ -4,7 +4,6 @@ idf_component_register(
         "app_state.c"
         "wifi_sta.c"
         "ntc.c"
-        "dc_pid.c"
         "control_lease.c"
         "safety_latch.c"
         "heater.c"

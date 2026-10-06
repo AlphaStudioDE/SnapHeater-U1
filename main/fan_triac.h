@@ -30,6 +30,8 @@ esp_err_t shu1_fan_triac_preinit_off(void);
 void shu1_fan_triac_set(bool on);
 void shu1_fan_triac_force_off(void);
 bool shu1_fan_triac_is_active(void);
+// Logical gate applied + fresh ZC only. No tachometer/airflow feedback exists;
+// true does NOT prove rotation, airflow, or healthy power-stage components.
 bool shu1_fan_triac_is_running(void);
 shu1_zero_cross_stats_t shu1_fan_triac_zero_cross_stats(void);
 

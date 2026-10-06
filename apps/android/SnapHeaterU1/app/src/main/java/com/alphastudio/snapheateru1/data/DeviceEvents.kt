@@ -71,7 +71,10 @@ object DeviceEvents {
     }
 }
 
-fun eventDescription(context: Context, code: String): String { return context.getString(when(code) {
+fun eventDescription(context: Context, code: String): String {
+    val mask=freezeEventMask(code)
+    if(mask!=0) return context.getString(R.string.freeze_event_sensor,context.getString(freezeSensorLabel(mask)))
+    return context.getString(when(code) {
     "sensor_freeze_warning" -> R.string.freeze_event_warning
     "sensor_raw_frozen" -> R.string.freeze_event_stopped
     "sensor_freeze_ended" -> R.string.freeze_event_ended

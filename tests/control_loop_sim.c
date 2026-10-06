@@ -18,7 +18,7 @@ static void (*zc_isr)(void *);
 static char lease[SHU1_LEASE_ID_LEN+1];
 static int64_t lease_deadline;
 static void step_time(int milliseconds);
-static bool freeze_case(void) {return scenario==17 || (scenario>=50 && scenario<=55);}
+static bool freeze_case(void) {return scenario==17 || (scenario>=50 && scenario<=55) || (scenario>=62 && scenario<=64);}
 
 int gpio_set_level(int pin,int value) {assert(pin>=0 && pin<22);pins[pin]=value;if(pin==18 && value)++high_writes;return 0;}
 int gpio_config(const gpio_config_t *c) {return 0;}
@@ -32,7 +32,12 @@ esp_err_t shu1_ntc_read(shu1_sensor_sample_t *out) {
     // injected dual-freeze case has a bit-identical pair for five minutes.
     out->chamber_raw=2000+(freeze_case() ? 0 : tick%2);
     out->ptc_raw=2100+(freeze_case() ? 0 : tick%2);
-    if(scenario==50 && freeze_warning_tick>=0 && tick>=freeze_warning_tick+10)out->ptc_raw+=1+tick%2;
+    if(scenario==62)out->ptc_raw+=tick%2;
+    if(scenario==63)out->chamber_raw+=tick%2;
+    if(scenario==64 && freeze_warning_tick>=0 && tick>=freeze_warning_tick+10)out->ptc_raw+=1+tick%2;
+    if(scenario==50 && freeze_warning_tick>=0 && tick>=freeze_warning_tick+10) {
+        out->ptc_raw+=1+tick%2; out->chamber_raw+=1+tick%2;
+    }
     if(scenario==46 && tick>=2)out->sequence=2; // cached sequence, fresh timestamps
     if(scenario==47 && tick==2)out->started_us-=2000000;
     if(scenario==48 && tick==2)out->completed_us+=10000;
@@ -73,6 +78,19 @@ static void stop_command(void) {
     shu1_state_update_settings_command(&st);shu1_control_release_any();
 }
 static void inject(void) {
+    if(scenario==65) {
+        if(tick==2)input.chamber_c=input.chamber_instant_c=55;
+        if(tick==3)input.chamber_c=input.chamber_instant_c=54.5f;
+        if(tick==4)input.chamber_c=input.chamber_instant_c=54;
+        if(tick==5)input.chamber_c=input.chamber_instant_c=53.9f;
+        if(tick==6)stop_command();
+    }
+    if(scenario==66) {
+        // Repeated foldback: five seconds ON, five seconds OFF. No physical
+        // model is claimed. Enough chamber/PTC rise suppresses the separate
+        // no-rise detector in each ON interval; advisory still observes 120 s.
+        input.ptc_c=input.ptc_instant_c=(tick%20)<10 ? 95:100;
+    }
     if(scenario>=51 && scenario<=55 && freeze_warning_tick>=0 && tick==freeze_warning_tick+10) {
         if(scenario==51)stop_command();
         if(scenario==52)input.ptc_instant_c=NAN;
@@ -284,6 +302,23 @@ uint32_t ulTaskNotifyTake(int clear,TickType_t ticks) {
     }
     if(scenario==25 && tick>=2)assert(!pins[18] && !shu1_safety_latch_is_set());
     if(scenario==26 && tick==2) {assert(!pins[18]);zc=false;}
+    if(scenario>=62 && scenario<=64) {
+        if(rt.sensor_freeze_warning_ms>0 && freeze_warning_tick<0)freeze_warning_tick=tick;
+        if(freeze_warning_tick>=0 && tick<freeze_warning_tick+600) {
+            assert(!shu1_safety_latch_is_set());
+            assert(rt.sensor_freeze_remaining_s>0);
+            assert(rt.sensor_freeze_mask==(scenario==63 ? 2U:scenario==64 && tick<freeze_warning_tick+10 ? 3U:1U));
+        }
+        if(freeze_warning_tick>=0 && tick>=freeze_warning_tick+600) {
+            assert(shu1_safety_latch_is_set() && !pins[18]);
+            assert(!shu1_state_get_settings().work_on);
+        }
+    }
+    if(scenario==65) {
+        if(tick==1 || tick==5)assert(pins[18]);
+        if((tick>=2 && tick<=4) || tick>=6)assert(!pins[18]);
+    }
+    if(scenario==66 && tick>=241)assert(rt.airflow_warning_pending);
     if(scenario==17) {
         if(rt.sensor_freeze_warning_ms>0 && freeze_warning_tick<0)freeze_warning_tick=tick;
         if(freeze_warning_tick>=0 && tick<freeze_warning_tick+600) {
@@ -333,7 +368,8 @@ int main(int argc,char **argv) {
     if(scenario==13)wdt_ok=false;
     if(scenario==24)zc=false;
     if(scenario==14)input.ptc_c=input.ptc_instant_c=60;
-    if(freeze_case()) {input.chamber_c=input.chamber_instant_c=54;input.ptc_c=input.ptc_instant_c=60;limit=1275;}
+    if(freeze_case()) {input.chamber_c=input.chamber_instant_c=53.9f;input.ptc_c=input.ptc_instant_c=60;limit=1275;}
+    if(scenario==66) {input.chamber_c=input.chamber_instant_c=50;input.ptc_c=input.ptc_instant_c=95;limit=260;}
     shu1_state_init();assert(shu1_control_lease_init()==ESP_OK);
     assert(shu1_safety_latch_init()==ESP_OK);
     assert(shu1_heater_preinit_off()==ESP_OK && !pins[18] && !pins[3]);
@@ -379,6 +415,7 @@ int main(int argc,char **argv) {
     st.work_on=scenario!=14 && scenario!=15;
     st.work_mode=SHU1_MODE_POWER_ON;st.target_temp_c=55;st.cool_release_c=35;
     st.manual_session_max_min=120;
+    if(scenario==66)st.airflow_detection_enabled=true;
     if(scenario>=56 && scenario<=58) {
         st.target_temp_c=45;
         st.symbiont_mode_enabled=st.symbiont_ventilation_allowed=st.symbiont_safe_control_enabled=true;
@@ -419,6 +456,8 @@ int main(int argc,char **argv) {
         if(scenario>=37)limit=735;
         if(scenario>=43)limit=8;
         if(scenario>=50 && scenario<=55)limit=1200;
+        if(scenario>=62 && scenario<=64)limit=800;
+        if(scenario==66)limit=260;
     }
     if(!setjmp(done))control_task(NULL);
     if(freeze_case())assert(freeze_warning_tick>=0);

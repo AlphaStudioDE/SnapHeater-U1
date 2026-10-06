@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — 2026-10-06 control corrections
+
+- Replace the old PID/10-second SSR window with local 1 C hysteresis control,
+  following DragonBreath's v1.1.19 default. Keep the 55 C target ceiling and
+  existing thermal, ZC, OFF, fault-latch and OTA interlocks.
+- Keep airflow warm-up observation across SSR OFF/foldback cycles; qualify it
+  with applied ON time and avoid treating normal target holding as failed rise.
+- Diagnose raw invariance per sensor, including continuous heating. Activity in
+  another sensor does not cancel the warning; retain the fixed 5-minute deadline.
+- Android version code 5: chamber/PTC/both sensor identity in freeze warnings,
+  notifications and history, with explicit unknown fallback for older firmware.
+  Read-only sensor identity is supplied over BLE and REST; deadlines are unchanged.
+- 114 host unittest tests, including 67 production-loop scenarios, 28 Android
+  unit tests, and the
+  real-mutex safety test pass. ESP-IDF 5.3.5 ESP32-C3 tester build passes.
+- These are source/local-build changes, not new published firmware or hardware
+  qualification. Existing 0.9.9 release assets remain unchanged.
+- See [details and remaining limits](docs/CONTROL_SAFETY_UPDATE.md).
+
 ## 0.9.9 Android correction — version code 4
 
 - Public APK: removed disconnected-device preview entry and gated restored state.

@@ -309,6 +309,7 @@ typedef struct {
     shu1_heater_fault_t heater_fault;
     int64_t sensor_freeze_warning_ms;
     int sensor_freeze_remaining_s;
+    unsigned sensor_freeze_mask; // 1=chamber, 2=PTC, 3=both; 0=none/unspecified
     int64_t last_sensor_ms;
     int64_t last_heat_off_ms;
     shu1_rise_detector_t rise_detector;

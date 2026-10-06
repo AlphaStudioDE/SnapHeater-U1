@@ -8,17 +8,27 @@ SnapHeater U1 treats chamber heating as a hazardous function.
 
 ## Firmware safety layers
 
-1. Normal heater and fan control are build-disabled by default; verified pins remain mapped.
+1. Current tester defaults include heater/fan support, but boot does not start a job.
+   A separate non-heating configuration exists; inspect the actual build configuration.
 2. Diagnostic probe commands are rejected; no secondary GPIO writer is admitted.
 3. Runtime safety checks and the Output Safety Latch guard physical heating.
 4. Sensor fault stops heater request.
 5. Chamber overtemperature stops heater request.
 6. PTC local overtemperature has a 105 C hard cutoff plus 33k/82k board foldback.
 7. Fan ON is applied at a validated zero-cross, OFF is immediate, and the heater
-   cannot energize until the fan is confirmed running.
+   cannot energize until the fan gate is applied and ZC is fresh. This is NOT
+   measured rotation/airflow; no tachometer feedback is available.
 8. Runtime policy caps the chamber target at 55 C, even if the configuration ceiling is higher.
 9. Drying mode has a timer.
 10. Heater abnormal/no-rise detector turns heater off if no temperature rise is observed.
+11. Current source uses full ON/OFF chamber control with 1 C hysteresis, matching
+    DragonBreath's v1.1.19 default policy. OFF at/above target, ON strictly below
+    target minus 1 C; retain previous demand between these thresholds. All safety
+    governors can cut immediately. No periodic PID SSR window is used.
+
+Source changes after published 0.9.9 are described in
+[CONTROL_SAFETY_UPDATE.md](CONTROL_SAFETY_UPDATE.md); they are not already present
+in the existing GitHub release binary.
 
 ## Heater abnormal detection
 

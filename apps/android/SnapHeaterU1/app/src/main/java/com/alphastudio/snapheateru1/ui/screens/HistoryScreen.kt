@@ -97,7 +97,8 @@ fun HistoryScreen(history: TemperatureHistory, snapshot: HeaterSnapshot, recordi
         Text(stringResource(R.string.error_history_title),style=MaterialTheme.typography.titleLarge)
         Text(stringResource(R.string.error_history_note),style=MaterialTheme.typography.bodySmall)
         if(snapshot.sensorFreezeWarningMs>0) Text(
-            if(telemetryFresh) stringResource(R.string.freeze_message,"SH_${snapshot.deviceId.takeLast(4)}",snapshot.sensorFreezeRemainingS)
+            if(telemetryFresh) stringResource(R.string.freeze_message,"SH_${snapshot.deviceId.takeLast(4)}",snapshot.sensorFreezeRemainingS,
+                stringResource(com.alphastudio.snapheateru1.data.freezeSensorLabel(snapshot.sensorFreezeMask)))
             else stringResource(R.string.freeze_disconnected), color=MaterialTheme.colorScheme.error)
         if(events.isEmpty()) Text(stringResource(R.string.error_history_empty))
         val eventFormat=SimpleDateFormat("dd.MM.yyyy HH:mm:ss",Locale.getDefault())

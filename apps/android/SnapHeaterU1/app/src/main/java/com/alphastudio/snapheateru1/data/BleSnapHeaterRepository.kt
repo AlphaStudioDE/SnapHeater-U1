@@ -184,6 +184,7 @@ private fun JSONObject.toBleSnapshot(): HeaterSnapshot {
         printerApiKeySet = optJSONObject("printer_setup")?.optBoolean("key_set",false) ?: false,
         sensorFreezeWarningMs = optLong("sensor_freeze_warning_ms", 0),
         sensorFreezeRemainingS = optInt("sensor_freeze_remaining_s", 0),
+        sensorFreezeMask = freezeMask(),
         usageAvailable = optBoolean("usage_available", false),
         heaterUsageMs = optLong("usage_heater_ms", 0),
         filterUsageMs = optLong("usage_filter_ms", 0),

@@ -1,8 +1,8 @@
 # Panda Breath GPIO map
 
 SnapHeater U1 accepts the following Panda Breath GPIO map for public development
-builds. Normal heater output remains locked by default and must not be enabled
-without safe bench testing.
+builds. Tester defaults include heater support but do not start heating on boot.
+This map is not a hardware qualification; see [safety status](SAFETY_STATUS.md).
 
 ## Accepted map
 
@@ -28,45 +28,26 @@ GPIO21 = UART0 TX through the CH340K USB bridge
 GPIO20 = UART0 RX through the CH340K USB bridge
 ```
 
-Panel support is intentionally disabled in the public defaults. GPIO7 is
+Panel support is enabled in tester defaults. GPIO7 is
 reserved for zero-cross detection, and GPIO0/GPIO1 are sensor inputs. Power LED
 support is separately disabled because GPIO21 is also UART0 TX. Buttons on
 strapping GPIO9/GPIO8/GPIO2 are ignored when held at boot until released.
 
 ## Safe bring-up order
 
-1. Open device with power disconnected.
+1. Hardware inspection must be performed by someone qualified for mains equipment,
+   with power disconnected and stored-energy hazards addressed.
 2. Photograph both sides of PCB.
 3. Identify heater connector, fan connector and NTC connectors.
 4. Confirm ADC channels move when warming the chamber and PTC sensors.
 5. Confirm fan behavior before any heater-related test.
-6. Confirm the heater output only with short, supervised probe pulses.
-7. Only then consider enabling normal heater output in SnapHeater U1.
+6. Qualify outputs using an appropriate protected test setup. The firmware has no
+   direct-GPIO probe bypass; do not create one to conduct this check.
+7. Actual heating must use the normal guarded control path under supervision.
 
 ## Diagnostic probe build
 
-Only after basic PCB inspection, compile with:
-
-```txt
-CONFIG_SHU1_ENABLE_GPIO_PROBE=y
-CONFIG_SHU1_ENABLE_HEATER_OUTPUT=n
-```
-
-Fan pulse:
-
-```bash
-curl -X POST http://snapheater.local/api/probe \
-  -H 'Content-Type: application/json' \
-  -d '{"output":"fan","duration_ms":1000}'
-```
-
-Heater probe command (expected to be rejected):
-
-```bash
-curl -X POST http://snapheater.local/api/probe \
-  -H 'Content-Type: application/json' \
-  -d '{"output":"heater","duration_ms":200}'
-```
-
-First heating must use the normal PID path and every runtime safety governor,
-never a direct GPIO pulse.
+The former probe API is disabled for both outputs. There is no supported probe
+build. Current heating uses the normal hysteresis regulator and every runtime
+safety governor, never a direct GPIO pulse. Panda fan control is held-gate ON/OFF,
+not PWM or phase-angle regulation.

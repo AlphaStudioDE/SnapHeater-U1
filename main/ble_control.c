@@ -243,6 +243,7 @@ static void build_status_json(char *buf, size_t len, bool diagnostics) {
         if (json_ok) json_ok = cJSON_AddNumberToObject(json,"session_limit_min",st.settings.manual_session_max_min) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "sensor_freeze_warning_ms", (double)st.runtime.sensor_freeze_warning_ms) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "sensor_freeze_remaining_s", st.runtime.sensor_freeze_remaining_s) != NULL;
+        if (json_ok) json_ok = cJSON_AddNumberToObject(json, "sensor_freeze_mask", st.runtime.sensor_freeze_mask) != NULL;
         if (json_ok) json_ok = cJSON_AddNumberToObject(json, "m", st.settings.work_mode) != NULL;
         if (json_ok) json_ok = shu1_wifi_status_json(json);
         if (json_ok) json_ok = shu1_recorder_usage(json);

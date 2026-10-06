@@ -433,6 +433,7 @@ static cJSON *state_to_json(void) {
     cJSON_AddStringToObject(runtime, "ptc_heater_status", shu1_heater_fault_str(st.runtime.heater_fault));
     cJSON_AddNumberToObject(runtime, "sensor_freeze_warning_ms", (double)st.runtime.sensor_freeze_warning_ms);
     cJSON_AddNumberToObject(runtime, "sensor_freeze_remaining_s", st.runtime.sensor_freeze_remaining_s);
+    cJSON_AddNumberToObject(runtime, "sensor_freeze_mask", st.runtime.sensor_freeze_mask);
     cJSON_AddNumberToObject(runtime, "last_sensor_ms", (double)st.runtime.last_sensor_ms);
     cJSON_AddBoolToObject(runtime, "rise_detect_active", st.runtime.rise_detector.active);
     cJSON_AddNumberToObject(runtime, "rise_detect_start_ptc", st.runtime.rise_detector.start_ptc_c);

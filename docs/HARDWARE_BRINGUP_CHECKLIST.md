@@ -1,5 +1,13 @@
 # SnapHeater U1 Hardware Bring-Up Checklist
 
+> **Historical engineering checklist, not current executable instructions.**
+> This file retains obsolete probe/unlock/PID steps for historical context.
+> Current firmware rejects ALL probe commands and normal operation has no separate
+> manual arm ceremony. Do not use those older steps or bypass interlocks.
+> Read [current safety status](SAFETY_STATUS.md), [tester build](TESTER_BUILD.md)
+> and [control changes](CONTROL_SAFETY_UPDATE.md) instead. No energized-device
+> validation is established by this checklist.
+
 Use this checklist for SnapHeater U1 on original Panda Breath V1.0/V1.0.1
 electronics. It does not cover AirGuard 300.
 

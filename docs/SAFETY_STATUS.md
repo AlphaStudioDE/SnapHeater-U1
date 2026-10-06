@@ -1,4 +1,13 @@
-# Public safety status — September 2026
+# Safety status — source updated October 2026
+
+> **Unreleased source corrections, 2026-10-06:** 1 C hysteresis control,
+> per-channel raw-freeze diagnostics and an airflow observation-window fix.
+> 114 host unittest tests (including 67 production-loop scenarios), 28 Android
+> unit tests, the real-mutex test and firmware/Android builds passed. Android
+> version code 5 names the suspected sensor when firmware supplies that detail.
+> These do not qualify hardware.
+> See [the control update](CONTROL_SAFETY_UPDATE.md). Existing published 0.9.9
+> assets are unchanged; the release verification below describes that release.
 
 > **Release 0.9.9: experimental supervised testing only.** See the
 > [installation guide](INSTALL_0.9.9.md) and [risk notice](HARDWARE_LIABILITY_DISCLAIMER.md).
@@ -72,7 +81,11 @@ claimed by these results.
 
 Known limits remain:
 
-- Plausible frozen sensor values near the target are not diagnosed reliably.
+- Per-channel bit-identical raw values can now be diagnosed with sufficient
+  applied heating evidence, but noisy/wrong-yet-changing readings, detached
+  sensors and other plausible failures are not diagnosed reliably.
+- Fan gate + ZC is not measured airflow. The corrected warm-up advisory is a
+  heuristic warning, not an independent loss-of-airflow shutdown.
 - Real TRIAC/SSR waveforms, resets, watchdog behavior and loss of cooling need
   physical qualification with independent protection.
 - SDK rollback simulation does not establish that an installed stock bootloader

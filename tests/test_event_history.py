@@ -10,6 +10,15 @@ ROOT=Path(__file__).resolve().parents[1]
 APP=ROOT/"apps/android/SnapHeaterU1/app/src/main/java/com/alphastudio/snapheateru1"
 
 class EventHistoryTests(unittest.TestCase):
+    def test_sensor_identity_is_read_only_and_shared_by_both_transports(self):
+        for filename in ("api_server.c","ble_control.c"):
+            self.assertIn('"sensor_freeze_mask", st.runtime.sensor_freeze_mask',(ROOT/"main"/filename).read_text())
+        for filename in ("BleSnapHeaterRepository.kt","FirmwareSnapHeaterRepository.kt"):
+            self.assertIn('sensorFreezeMask =',(APP/"data"/filename).read_text())
+        payload=(APP/"data/ControlPayloads.kt").read_text()
+        self.assertNotIn("sensorFreezeMask",payload)
+        self.assertNotIn("sensor_freeze_mask",payload)
+
     def test_deduplication_device_boot_separation_and_date_order(self):
         source=(APP/"data/EventHistory.kt").read_text(encoding="utf-8")
         with sqlite3.connect(":memory:") as db:
@@ -44,7 +53,7 @@ class EventHistoryTests(unittest.TestCase):
     def test_firmware_warning_is_not_a_sensor_fault_and_has_fixed_grace(self):
         source=(ROOT/"main/safety.c").read_text(encoding="utf-8")
         self.assertIn("sample_health != SHU1_SAMPLE_HEALTHY && sample_health != SHU1_SAMPLE_WARNING",source)
-        self.assertIn('"sensor_freeze_warning"',source)
+        self.assertIn('shu1_sensor_warning_code(rt.sensor_freeze_mask)',source)
         monitor=(ROOT/"main/sensor_watch.h").read_text(encoding="utf-8")
         self.assertIn("SHU1_RAW_WARNING_GRACE_US INT64_C(300000000)",monitor)
         self.assertNotIn("acknowledge",monitor.split("typedef struct",1)[1].split("} shu1_sensor_watch_t",1)[0])
