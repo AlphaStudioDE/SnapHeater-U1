@@ -39,7 +39,7 @@ def main():
     parser.add_argument('--aapt', type=Path, required=True)
     args = parser.parse_args()
     version = re.search(r'#define SHU1_FW_VERSION\s+"([^"]+)"', (ROOT/'main/app_config.h').read_text()).group(1)
-    assert version == '0.9.9', 'Review package naming/policy for each release'
+    assert version == '0.9.10', 'Review package naming/policy for each release'
     tag = 'v' + version
     image = args.build/'SnapHeater_U1.bin'
     raw = image.read_bytes()
@@ -53,7 +53,7 @@ def main():
     assert provenance['artifacts']['SnapHeater_U1.bin']['sha256'] == digest(image)
     assert provenance['artifacts']['app-debug.apk']['sha256'] == digest(args.apk)
     badging = subprocess.check_output([str(args.aapt), 'dump', 'badging', str(args.apk)], text=True)
-    assert "versionName='0.9.9'" in badging and "versionCode='5'" in badging, 'Never package a local preview APK'
+    assert "versionName='0.9.10'" in badging and "versionCode='6'" in badging, 'Never package a local preview APK'
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)  # Never overwrite an existing release.
     bin_name = f'SnapHeater-U1-{version}-ota.bin'
@@ -61,10 +61,11 @@ def main():
     shutil.copyfile(image, out/bin_name)
     shutil.copyfile(args.apk, out/apk_name)
     documents = {
-        'INSTALL.md': 'docs/INSTALL_0.9.9.md',
+        'INSTALL.md': 'docs/INSTALL_0.9.10.md',
         'TESTING-RISK-NOTICE.md': 'docs/HARDWARE_LIABILITY_DISCLAIMER.md',
         'SAFETY-STATUS.md': 'docs/SAFETY_STATUS.md',
-        'RELEASE-NOTES.md': 'docs/RELEASE_0.9.9.md',
+        'RELEASE-NOTES.md': 'docs/RELEASE_0.9.10.md',
+        'CONTROL-CHANGES.md': 'docs/CONTROL_SAFETY_UPDATE.md',
         'LICENSE.txt': 'LICENSE',
         'THIRD-PARTY-NOTICES.md': 'THIRD_PARTY_NOTICES.md',
         'DragonBreath-MIT.txt': 'docs/licenses/DragonBreath-MIT.txt',
@@ -75,7 +76,7 @@ def main():
         (out/name).write_text(public_links(text, Path(source).parent, provenance['git_revision']), encoding='utf-8')
     provenance.update({
         'release_tag': tag, 'status': 'experimental-prerelease',
-        'android_version': version, 'android_version_code': 5,
+        'android_version': version, 'android_version_code': 6,
         'visual_preview_available': False,
         'android_build_type': 'debug/testing; not production-signed',
         'installation': 'app-only OTA; never flash application at 0x0',

@@ -9,7 +9,7 @@
 #include "sdkconfig.h"
 
 #define SHU1_FW_NAME        "SnapHeater U1"
-#define SHU1_FW_VERSION     "0.9.9"
+#define SHU1_FW_VERSION     "0.9.10"
 #define SHU1_DEFAULT_MATERIAL_MISMATCH_WARNING_ENABLED 1
 #define SHU1_PROJECT_URL    "https://github.com/AlphaStudioDE/SnapHeater-U1"
 

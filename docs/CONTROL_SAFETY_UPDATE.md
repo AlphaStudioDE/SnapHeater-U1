@@ -1,4 +1,4 @@
-# Post-0.9.9 control corrections (source, not a released image)
+# Control corrections included in experimental release 0.9.10
 
 Reference checked 2026-10-06: DragonBreath
 `f311a22c39a3e3aef92d10f0f6c3f2d5d63e02b9`, with
@@ -50,7 +50,7 @@ fault is possible, not proof of the cause in a particular unit.
 Verified locally: 114 Python unittest tests, including 67 production-control-loop
 scenarios, plus the separate real-mutex OFF/maintenance/SSR-before-NVS test.
 ESP-IDF 5.3.5 compiled the ESP32-C3 tester configuration successfully in a separate
-build directory. Android version code 5 passed 28 unit tests and assembleDebug,
+build directory. Android 0.9.10 (version code 6) passed 28 unit tests and assembleDebug,
 with disconnected-device preview disabled. The companion update names the
 suspected sensor in the warning dialog, notifications and event history. Missing
 sensor identity from older firmware is explicitly unspecified, never guessed.
@@ -58,5 +58,6 @@ The identity field is read-only and cannot change the warning deadline.
 
 Host tests execute production policies and the control loop with fake ADC, time,
 GPIO and NVS. They test logic, not energized hardware or real thermal response.
-Current source is separate from the existing published 0.9.9 assets. A local
-build or these notes do not constitute a new release or permission to flash.
+The new 0.9.10 assets include these corrections; older 0.9.9 assets are unchanged.
+Read [installation and recovery](INSTALL_0.9.10.md) and the hardware risk notice.
+Passing these tests does not establish safe operation on your physical device.

@@ -12,9 +12,9 @@ android {
         applicationId = "com.alphastudio.snapheateru1"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
+        versionCode = 6
         val localPreview = providers.gradleProperty("localPreview").orNull == "true"
-        versionName = if (localPreview) "0.9.9-preview" else "0.9.9"
+        versionName = if (localPreview) "0.9.10-preview" else "0.9.10"
         buildConfigField("boolean", "ENABLE_VISUAL_PREVIEW", localPreview.toString())
     }
 

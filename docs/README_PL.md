@@ -1,4 +1,4 @@
-# SnapHeater U1 0.9.9
+# SnapHeater U1 0.9.10
 
 **Twoja grzałka komory. Połączona z Twoim wydrukiem.**
 
@@ -32,8 +32,8 @@ Nie obiecujemy potwierdzonej poprawy jakości wydruków, oszczędności energii 
 większego bezpieczeństwa niż stock — takie porównania wymagają pomiarów.
 Powiadomienia telefonu nie są gwarantowane i nie zastępują nadzoru.
 
-[Pobierz wydanie](https://github.com/AlphaStudioDE/SnapHeater-U1/releases/tag/v0.9.9) ·
-[Instrukcja instalacji / OTA](INSTALL_0.9.9.md) · [Stan funkcji](../FEATURE_MATRIX.md) ·
+[Pobierz wydanie](https://github.com/AlphaStudioDE/SnapHeater-U1/releases/tag/v0.9.10) ·
+[Instrukcja instalacji / OTA](INSTALL_0.9.10.md) · [Stan funkcji](../FEATURE_MATRIX.md) ·
 [Galeria](GALLERY.md) · [Opis projektu i Innovation Fund](PROJECT_STORY.md).
 
 Projekt został reanimowany dzięki odkryciom **plastikmana, autora

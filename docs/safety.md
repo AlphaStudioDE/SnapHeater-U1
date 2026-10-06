@@ -26,9 +26,9 @@ SnapHeater U1 treats chamber heating as a hazardous function.
     target minus 1 C; retain previous demand between these thresholds. All safety
     governors can cut immediately. No periodic PID SSR window is used.
 
-Source changes after published 0.9.9 are described in
-[CONTROL_SAFETY_UPDATE.md](CONTROL_SAFETY_UPDATE.md); they are not already present
-in the existing GitHub release binary.
+Changes included in 0.9.10 are described in
+[CONTROL_SAFETY_UPDATE.md](CONTROL_SAFETY_UPDATE.md); they are not present in the
+older 0.9.9 release binary.
 
 ## Heater abnormal detection
 

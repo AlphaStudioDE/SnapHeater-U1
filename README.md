@@ -4,7 +4,7 @@
 <p align="center"><strong>Your chamber heater. Connected to your print.</strong></p>
 <p align="center">Open firmware for original Panda Breath electronics • Android companion • Snapmaker U1 integration</p>
 
-[![Firmware](https://img.shields.io/badge/firmware-0.9.9-orange)](https://github.com/AlphaStudioDE/SnapHeater-U1/releases/tag/v0.9.9)
+[![Firmware](https://img.shields.io/badge/firmware-0.9.10-orange)](https://github.com/AlphaStudioDE/SnapHeater-U1/releases/tag/v0.9.10)
 [![Status](https://img.shields.io/badge/status-experimental_prerelease-orange)](docs/SAFETY_STATUS.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -15,8 +15,8 @@
 > the device safe. Read the [testing and risk notice](docs/HARDWARE_LIABILITY_DISCLAIMER.md)
 > and [known limitations](docs/SAFETY_STATUS.md) before installing.
 
-[Download 0.9.9](https://github.com/AlphaStudioDE/SnapHeater-U1/releases/tag/v0.9.9) ·
-[Install / OTA guide](docs/INSTALL_0.9.9.md) ·
+[Download 0.9.10](https://github.com/AlphaStudioDE/SnapHeater-U1/releases/tag/v0.9.10) ·
+[Install / OTA guide](docs/INSTALL_0.9.10.md) ·
 [Polski](docs/README_PL.md) ·
 [Feature status](FEATURE_MATRIX.md) ·
 [Report a problem](https://github.com/AlphaStudioDE/SnapHeater-U1/issues/new/choose)
